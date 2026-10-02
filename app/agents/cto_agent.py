@@ -1,7 +1,8 @@
 import os
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from app.tools.memory import save_memory, get_memory
+from app.tools.crud import ALL_TOOLS
 
 SYSTEM_PROMPT = """Sos el asistente personal de German Guerriero, CTO de Tecnología Digital en Arcos Dorados (McDonald's Argentina).
 
@@ -30,18 +31,26 @@ Tu rol es ayudarlo a gestionar su equipo, proyectos, decisiones técnicas y comu
 
 == CÓMO OPERAR ==
 - Respondé en español rioplatense, directo y práctico
-- Si detectás un hecho importante que Ger debería recordar, usá la tool save_memory
-- Cuando necesitás contexto previo, usá la tool get_memory
+- Cuando alguien menciona una reunión o 1:1, ofrecé registrarla con create_one_on_one
+- Cuando detectás un pendiente o tarea, ofrecé registrarla con create_task
+- Cuando alguien pide sus pendientes, usá get_tasks
+- Cuando alguien pide ver 1:1s, usá get_one_on_ones
+- Si detectás un hecho importante, guardalo con save_memory
 - Para updates a stakeholders usá lenguaje ejecutivo sin tecnicismos
+- Cuando respondas por Telegram, usá formato simple sin markdown complejo
 
-== MEMORIA ==
+== MEMORIA PERSISTENTE ==
 {memory}
 """
+
+TOOLS = [save_memory, get_memory] + ALL_TOOLS
 
 llm = ChatAnthropic(
     model="claude-opus-4-5",
     api_key=os.environ.get("ANTHROPIC_API_KEY")
-).bind_tools([save_memory, get_memory])
+).bind_tools(TOOLS)
+
+TOOL_MAP = {t.name: t for t in TOOLS}
 
 def run_cto_agent(messages: list[dict], memory: str = "") -> str:
     """Ejecuta el CTO Agent con el historial de mensajes."""
@@ -52,26 +61,23 @@ def run_cto_agent(messages: list[dict], memory: str = "") -> str:
         if m["role"] == "user":
             lc_messages.append(HumanMessage(content=m["content"]))
         elif m["role"] == "assistant":
-            lc_messages.append(AIMessage(content=m["content"]))
+            lc_messages.append(AIMessage(content=m["content"] if isinstance(m["content"], str) else ""))
 
-    response = llm.invoke(lc_messages)
+    # Agentic loop — máximo 5 iteraciones
+    for _ in range(5):
+        response = llm.invoke(lc_messages)
 
-    # Procesar tool calls si las hay
-    if response.tool_calls:
-        from langchain_core.messages import ToolMessage
-        tool_results = []
-        for tc in response.tool_calls:
-            if tc["name"] == "save_memory":
-                result = save_memory.invoke(tc["args"])
-            elif tc["name"] == "get_memory":
-                result = get_memory.invoke(tc["args"])
-            else:
-                result = "Tool no reconocida"
-            tool_results.append(ToolMessage(content=result, tool_call_id=tc["id"]))
+        if not response.tool_calls:
+            return response.content
 
+        # Procesar tool calls
         lc_messages.append(response)
-        lc_messages.extend(tool_results)
-        final = llm.invoke(lc_messages)
-        return final.content
+        for tc in response.tool_calls:
+            tool = TOOL_MAP.get(tc["name"])
+            if tool:
+                result = tool.invoke(tc["args"])
+            else:
+                result = f"Tool '{tc['name']}' no reconocida"
+            lc_messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
 
     return response.content
