@@ -1,95 +1,139 @@
 import os
 import logging
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
-from app.tools.memory import save_memory, get_memory
-from app.tools.crud import ALL_TOOLS
-from app.tools.rag import search_knowledge, ingest_to_knowledge_base
+import httpx
+from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
+load_dotenv()
+
+from app.graph import process_message
+from app.tools.memory import reset_history
+from app.tools.ingest import transcribe_audio, download_telegram_file, extract_text_from_document
+from app.tools.rag import ingest_text
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """Sos el asistente personal de German Guerriero, CTO de Tecnología Digital en Arcos Dorados (McDonald's Argentina).
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-Tu rol es ayudarlo a gestionar su equipo, proyectos, decisiones técnicas y comunicación con stakeholders.
+app = FastAPI(title="CTO Hub", version="3.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-== EQUIPO DIRECTO ==
-- Pablo C: Chapter Lead BAs
-- Her: Líder Mobile
-- Gonza: Líder de Soporte
-- Diego: DevOps
-- Pablo N: Líder Arquitectura e Infra
-- Caro: Líder QA
-- Zorro: Líder iOS
-- Saez: Líder Android
-- Gallo: PO Flex Digital y Menu Editor (tiene a Alex y Pili como reportes)
+HELP_TEXT = """🤖 CTO Hub — Comandos y funciones
 
-== STAKEHOLDERS ==
-- Diego M: VP Regional de Tecnología (jefe directo)
-- Pablo E: Líder de Negocio Plataformas Digitales
-- Carly: Líder de Negocio Digital
+/reset — Borra el historial de conversación
+/help — Esta ayuda
 
-== ÁREAS ==
-- Plataformas Digitales: app mobile propia de ecommerce QSR
-- Flex Digital: hub de pedidos — expone catálogos e inserta pedidos en POS
-- Menu Editor: organiza catálogos para Flex Digital
-
-== CÓMO OPERAR ==
-- Respondé en español rioplatense, directo y práctico
-- SIEMPRE que alguien pregunte sobre un tema específico, usá search_knowledge primero
-- Cuando alguien menciona una reunión o 1:1, ofrecé registrarla con create_one_on_one
-- Cuando detectás un pendiente o tarea, ofrecé registrarla con create_task
-- Cuando alguien pide sus pendientes, usá get_tasks
-- Cuando alguien pide ver 1:1s, usá get_one_on_ones
-- Cuando alguien pide "guardá esto", "tomá nota de", usá ingest_to_knowledge_base
-- Si detectás un hecho importante, guardalo con save_memory
-- Para updates a stakeholders usá lenguaje ejecutivo sin tecnicismos
-- Cuando respondas por Telegram, usá formato simple sin markdown complejo
-
-== MEMORIA PERSISTENTE ==
-{memory}
+Cómo usarme:
+- Hablame en lenguaje natural
+- Mandame un audio → lo transcribo, proceso e indexo
+- Mandame un documento o PDF → lo leo e indexo
+- "registrá el 1:1 con Her: tema1, tema2"
+- "anotá tarea: revisar PR de Zorro"
+- "qué tareas tengo pendientes?"
+- "toma nota del siguiente texto: [texto]"
+- "qué sé sobre [tema]?" → busca en tu knowledge base
+- "recordá que [hecho importante]"
 """
 
-TOOLS = [save_memory, get_memory, search_knowledge, ingest_to_knowledge_base] + ALL_TOOLS
-TOOL_MAP = {t.name: t for t in TOOLS}
+async def send_message(chat_id: str, text: str):
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{TELEGRAM_API}/sendMessage", json={
+            "chat_id": chat_id,
+            "text": text
+        })
+        logger.info(f"Telegram: {r.status_code}")
 
-llm = ChatAnthropic(
-    model="claude-opus-4-5",
-    api_key=os.environ.get("ANTHROPIC_API_KEY")
-).bind_tools(TOOLS)
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "cto-hub", "version": "3.0.0"}
 
-def run_cto_agent(messages: list[dict], memory: str = "") -> str:
-    """Ejecuta el CTO Agent con el historial de mensajes."""
-    system = SystemMessage(content=SYSTEM_PROMPT.format(memory=memory or "Sin memoria cargada."))
-    lc_messages = [system]
+@app.post("/telegram/webhook")
+async def webhook(request: Request, background_tasks: BackgroundTasks):
+    try:
+        data = await request.json()
+        message = data.get("message", {})
+        chat_id = str(message.get("chat", {}).get("id", ""))
 
-    for m in messages:
-        if m["role"] == "user":
-            lc_messages.append(HumanMessage(content=m["content"]))
-        elif m["role"] == "assistant":
-            content = m["content"]
-            if isinstance(content, str) and content.strip():
-                lc_messages.append(AIMessage(content=content))
+        if message.get("from", {}).get("is_bot", False):
+            return {"ok": True}
 
-    for i in range(5):
-        response = llm.invoke(lc_messages)
-        logger.info(f"Iteración {i} — stop_reason: {response.stop_reason}, tool_calls: {len(response.tool_calls)}, content len: {len(str(response.content))}")
+        if not chat_id:
+            return {"ok": True}
 
-        if not response.tool_calls:
-            text = response.content
-            if not text or not str(text).strip():
-                logger.warning("Respuesta vacía del agente")
-                return "No pude generar una respuesta. Intentá de nuevo."
-            return str(text)
+        text = message.get("text", "").strip()
+        voice = message.get("voice") or message.get("audio")
+        document = message.get("document")
+        caption = message.get("caption", "").strip()
 
-        lc_messages.append(response)
-        for tc in response.tool_calls:
-            logger.info(f"Tool call: {tc['name']} — args: {tc['args']}")
-            tool = TOOL_MAP.get(tc["name"])
-            if tool:
-                result = tool.invoke(tc["args"])
-                logger.info(f"Tool result: {str(result)[:200]}")
-            else:
-                result = f"Tool '{tc['name']}' no reconocida"
-            lc_messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+        # Comandos
+        if text.lower() == "/reset":
+            reset_history(chat_id)
+            await send_message(chat_id, "🗑️ Historial borrado.")
+            return {"ok": True}
 
-    return "Alcancé el límite de iteraciones. Intentá reformular la pregunta."
+        if text.lower() == "/help":
+            await send_message(chat_id, HELP_TEXT)
+            return {"ok": True}
+
+        # Mensaje de voz
+        if voice:
+            async def handle_voice():
+                await send_message(chat_id, "🎙️ Transcribiendo...")
+                try:
+                    audio_bytes = await download_telegram_file(voice["file_id"])
+                    transcribed = await transcribe_audio(audio_bytes)
+                    if not transcribed.strip():
+                        await send_message(chat_id, "⚠️ No pude entender el audio.")
+                        return
+                    logger.info(f"Transcripción: {transcribed}")
+                    await send_message(chat_id, f"📝 Entendí: {transcribed}")
+                    # Ingestar en knowledge base
+                    ingest_text(transcribed, source="audio", type="audio")
+                    response = process_message(chat_id, transcribed)
+                    await send_message(chat_id, response)
+                except Exception as e:
+                    logger.error(f"Error en voz: {e}", exc_info=True)
+                    await send_message(chat_id, "⚠️ Error procesando el audio.")
+            background_tasks.add_task(handle_voice)
+            return {"ok": True}
+
+        # Documento
+        if document:
+            async def handle_document():
+                await send_message(chat_id, "📄 Leyendo el documento...")
+                try:
+                    file_bytes = await download_telegram_file(document["file_id"])
+                    mime_type = document.get("mime_type", "text/plain")
+                    filename = document.get("file_name", "documento.txt")
+                    text_content = await extract_text_from_document(file_bytes, mime_type, filename)
+                    # Ingestar en knowledge base
+                    ingest_text(text_content, source=filename, type="document")
+                    prompt = caption if caption else "Procesá este documento y decime de qué trata"
+                    full_message = f"{prompt}\n\n[Contenido de '{filename}']:\n{text_content[:6000]}"
+                    response = process_message(chat_id, full_message)
+                    await send_message(chat_id, response)
+                except Exception as e:
+                    logger.error(f"Error en documento: {e}", exc_info=True)
+                    await send_message(chat_id, "⚠️ Error procesando el documento.")
+            background_tasks.add_task(handle_document)
+            return {"ok": True}
+
+        # Texto normal
+        if text:
+            async def handle_text():
+                # Ingestar textos largos automáticamente
+                if len(text) > 200:
+                    ingest_text(text, source="telegram", type="text")
+                response = process_message(chat_id, text)
+                await send_message(chat_id, response)
+            background_tasks.add_task(handle_text)
+            return {"ok": True}
+
+        return {"ok": True}
+
+    except Exception as e:
+        logger.error(f"Error en webhook: {e}", exc_info=True)
+        return {"ok": True}
