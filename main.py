@@ -3,6 +3,7 @@ import logging
 import httpx
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,6 +12,8 @@ from app.graph import process_message
 from app.tools.memory import reset_history
 from app.tools.ingest import transcribe_audio, download_telegram_file, extract_text_from_document
 from app.tools.rag import ingest_text
+from app.tools.calendar import get_auth_url, exchange_code, save_tokens
+from app.tools.calendar_tools import set_current_chat_id
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,24 +21,24 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-app = FastAPI(title="CTO Hub", version="3.0.0")
+# Mapeo temporal code → chat_id para OAuth
+_oauth_state: dict = {}
+
+app = FastAPI(title="CTO Hub", version="4.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-HELP_TEXT = """🤖 CTO Hub — Comandos y funciones
+HELP_TEXT = """🤖 CTO Hub — Comandos
 
-/reset — Borra el historial de conversación
+/reset — Borra historial
+/conectar_calendar — Conecta Google Calendar
 /help — Esta ayuda
 
-Cómo usarme:
-- Hablame en lenguaje natural
-- Mandame un audio → lo transcribo, proceso e indexo
-- Mandame un documento o PDF → lo leo e indexo
-- "registrá el 1:1 con Her: tema1, tema2"
-- "anotá tarea: revisar PR de Zorro"
-- "qué tareas tengo pendientes?"
-- "toma nota del siguiente texto: [texto]"
-- "qué sé sobre [tema]?" → busca en tu knowledge base
-- "recordá que [hecho importante]"
+Funciones:
+- Registrar 1:1s, notas, tareas
+- Buscar en knowledge base
+- Ver agenda del calendario
+- Procesar audios y documentos
+- "recordá que [hecho]"
 """
 
 async def send_message(chat_id: str, text: str):
@@ -48,7 +51,22 @@ async def send_message(chat_id: str, text: str):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "cto-hub", "version": "3.0.0"}
+    return {"status": "ok", "service": "cto-hub", "version": "4.0.0"}
+
+@app.get("/auth/google/callback")
+async def google_callback(code: str, state: str = ""):
+    """Callback de OAuth de Google."""
+    chat_id = _oauth_state.get(state, "")
+    if not chat_id:
+        return HTMLResponse("<h2>Error: sesión expirada. Intentá de nuevo desde Telegram.</h2>")
+    try:
+        tokens = await exchange_code(code)
+        save_tokens(chat_id, tokens)
+        await send_message(chat_id, "✅ Google Calendar conectado. Probá con: 'qué tengo en el calendario esta semana?'")
+        return HTMLResponse("<h2>✅ Google Calendar conectado. Podés cerrar esta ventana.</h2>")
+    except Exception as e:
+        logger.error(f"Error OAuth: {e}")
+        return HTMLResponse(f"<h2>Error al conectar: {str(e)}</h2>")
 
 @app.post("/telegram/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
@@ -68,7 +86,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         document = message.get("document")
         caption = message.get("caption", "").strip()
 
-        # Comandos
+        # Setear chat_id para las calendar tools
+        set_current_chat_id(chat_id)
+
         if text.lower() == "/reset":
             reset_history(chat_id)
             await send_message(chat_id, "🗑️ Historial borrado.")
@@ -78,7 +98,15 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             await send_message(chat_id, HELP_TEXT)
             return {"ok": True}
 
-        # Mensaje de voz
+        if text.lower() == "/conectar_calendar":
+            import uuid
+            state = str(uuid.uuid4())
+            _oauth_state[state] = chat_id
+            auth_url = get_auth_url() + f"&state={state}"
+            await send_message(chat_id, f"📅 Hacé click para conectar Google Calendar:\n{auth_url}")
+            return {"ok": True}
+
+        # Voz
         if voice:
             async def handle_voice():
                 await send_message(chat_id, "🎙️ Transcribiendo...")
@@ -88,10 +116,9 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     if not transcribed.strip():
                         await send_message(chat_id, "⚠️ No pude entender el audio.")
                         return
-                    logger.info(f"Transcripción: {transcribed}")
                     await send_message(chat_id, f"📝 Entendí: {transcribed}")
-                    # Ingestar en knowledge base
                     ingest_text(transcribed, source="audio", type="audio")
+                    set_current_chat_id(chat_id)
                     response = process_message(chat_id, transcribed)
                     await send_message(chat_id, response)
                 except Exception as e:
@@ -109,10 +136,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     mime_type = document.get("mime_type", "text/plain")
                     filename = document.get("file_name", "documento.txt")
                     text_content = await extract_text_from_document(file_bytes, mime_type, filename)
-                    # Ingestar en knowledge base
                     ingest_text(text_content, source=filename, type="document")
                     prompt = caption if caption else "Procesá este documento y decime de qué trata"
                     full_message = f"{prompt}\n\n[Contenido de '{filename}']:\n{text_content[:6000]}"
+                    set_current_chat_id(chat_id)
                     response = process_message(chat_id, full_message)
                     await send_message(chat_id, response)
                 except Exception as e:
@@ -121,12 +148,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(handle_document)
             return {"ok": True}
 
-        # Texto normal
+        # Texto
         if text:
             async def handle_text():
-                # Ingestar textos largos automáticamente
                 if len(text) > 200:
                     ingest_text(text, source="telegram", type="text")
+                set_current_chat_id(chat_id)
                 response = process_message(chat_id, text)
                 await send_message(chat_id, response)
             background_tasks.add_task(handle_text)
