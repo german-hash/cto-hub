@@ -10,6 +10,7 @@ load_dotenv()
 from app.graph import process_message
 from app.tools.memory import reset_history
 from app.tools.ingest import transcribe_audio, download_telegram_file, extract_text_from_document
+from app.tools.rag import ingest_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,23 +18,25 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-app = FastAPI(title="CTO Hub", version="2.0.0")
+app = FastAPI(title="CTO Hub", version="3.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-HELP_TEXT = """🤖 *CTO Hub — Comandos y funciones*
+HELP_TEXT = """🤖 CTO Hub — Comandos y funciones
 
 /reset — Borra el historial de conversación
 /help — Esta ayuda
 
-💬 *Cómo usarme:*
+Cómo usarme:
 - Hablame en lenguaje natural
-- Mandame un audio → lo transcribo y proceso
+- Mandame un audio → lo transcribo, proceso e indexo
+- Mandame un documento o PDF → lo leo e indexo
 - "registrá el 1:1 con Her: tema1, tema2"
 - "anotá tarea: revisar PR de Zorro"
 - "qué tareas tengo pendientes?"
 - "toma nota del siguiente texto: [texto]"
+- "qué sé sobre [tema]?" → busca en tu knowledge base
 - "recordá que [hecho importante]"
-- Mandame un documento o PDF → lo leo y proceso"""
+"""
 
 async def send_message(chat_id: str, text: str):
     async with httpx.AsyncClient() as client:
@@ -41,11 +44,11 @@ async def send_message(chat_id: str, text: str):
             "chat_id": chat_id,
             "text": text
         })
-        logger.info(f"Telegram sendMessage: {r.status_code}")
+        logger.info(f"Telegram: {r.status_code}")
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "cto-hub", "version": "2.0.0"}
+    return {"status": "ok", "service": "cto-hub", "version": "3.0.0"}
 
 @app.post("/telegram/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
@@ -54,7 +57,6 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         message = data.get("message", {})
         chat_id = str(message.get("chat", {}).get("id", ""))
 
-        # Ignorar mensajes del bot
         if message.get("from", {}).get("is_bot", False):
             return {"ok": True}
 
@@ -88,6 +90,8 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                         return
                     logger.info(f"Transcripción: {transcribed}")
                     await send_message(chat_id, f"📝 Entendí: {transcribed}")
+                    # Ingestar en knowledge base
+                    ingest_text(transcribed, source="audio", type="audio")
                     response = process_message(chat_id, transcribed)
                     await send_message(chat_id, response)
                 except Exception as e:
@@ -96,7 +100,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(handle_voice)
             return {"ok": True}
 
-        # Documento o archivo
+        # Documento
         if document:
             async def handle_document():
                 await send_message(chat_id, "📄 Leyendo el documento...")
@@ -105,11 +109,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
                     mime_type = document.get("mime_type", "text/plain")
                     filename = document.get("file_name", "documento.txt")
                     text_content = await extract_text_from_document(file_bytes, mime_type, filename)
-
-                    # Armar prompt con el contenido del documento
-                    prompt = caption if caption else "Procesá este documento"
-                    full_message = f"{prompt}\n\n[Contenido del documento '{filename}']:\n{text_content[:6000]}"
-
+                    # Ingestar en knowledge base
+                    ingest_text(text_content, source=filename, type="document")
+                    prompt = caption if caption else "Procesá este documento y decime de qué trata"
+                    full_message = f"{prompt}\n\n[Contenido de '{filename}']:\n{text_content[:6000]}"
                     response = process_message(chat_id, full_message)
                     await send_message(chat_id, response)
                 except Exception as e:
@@ -118,9 +121,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(handle_document)
             return {"ok": True}
 
-        # Mensaje de texto normal
+        # Texto normal
         if text:
             async def handle_text():
+                # Ingestar textos largos automáticamente
+                if len(text) > 200:
+                    ingest_text(text, source="telegram", type="text")
                 response = process_message(chat_id, text)
                 await send_message(chat_id, response)
             background_tasks.add_task(handle_text)

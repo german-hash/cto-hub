@@ -3,6 +3,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from app.tools.memory import save_memory, get_memory
 from app.tools.crud import ALL_TOOLS
+from app.tools.rag import search_knowledge, ingest_to_knowledge_base
 
 SYSTEM_PROMPT = """Sos el asistente personal de German Guerriero, CTO de Tecnología Digital en Arcos Dorados (McDonald's Argentina).
 
@@ -35,6 +36,8 @@ Tu rol es ayudarlo a gestionar su equipo, proyectos, decisiones técnicas y comu
 - Cuando detectás un pendiente o tarea, ofrecé registrarla con create_task
 - Cuando alguien pide sus pendientes, usá get_tasks
 - Cuando alguien pide ver 1:1s, usá get_one_on_ones
+- Cuando alguien pregunta sobre algo específico (un proyecto, una persona, un tema), buscá primero en search_knowledge
+- Cuando alguien pide "guardá esto", "tomá nota de", "quiero recordar", usá ingest_to_knowledge_base
 - Si detectás un hecho importante, guardalo con save_memory
 - Para updates a stakeholders usá lenguaje ejecutivo sin tecnicismos
 - Cuando respondas por Telegram, usá formato simple sin markdown complejo
@@ -43,14 +46,13 @@ Tu rol es ayudarlo a gestionar su equipo, proyectos, decisiones técnicas y comu
 {memory}
 """
 
-TOOLS = [save_memory, get_memory] + ALL_TOOLS
+TOOLS = [save_memory, get_memory, search_knowledge, ingest_to_knowledge_base] + ALL_TOOLS
+TOOL_MAP = {t.name: t for t in TOOLS}
 
 llm = ChatAnthropic(
     model="claude-opus-4-5",
     api_key=os.environ.get("ANTHROPIC_API_KEY")
 ).bind_tools(TOOLS)
-
-TOOL_MAP = {t.name: t for t in TOOLS}
 
 def run_cto_agent(messages: list[dict], memory: str = "") -> str:
     """Ejecuta el CTO Agent con el historial de mensajes."""
@@ -63,14 +65,12 @@ def run_cto_agent(messages: list[dict], memory: str = "") -> str:
         elif m["role"] == "assistant":
             lc_messages.append(AIMessage(content=m["content"] if isinstance(m["content"], str) else ""))
 
-    # Agentic loop — máximo 5 iteraciones
     for _ in range(5):
         response = llm.invoke(lc_messages)
 
         if not response.tool_calls:
             return response.content
 
-        # Procesar tool calls
         lc_messages.append(response)
         for tc in response.tool_calls:
             tool = TOOL_MAP.get(tc["name"])
