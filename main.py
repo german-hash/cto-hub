@@ -14,6 +14,8 @@ from app.tools.ingest import transcribe_audio, download_telegram_file, extract_t
 from app.tools.rag import ingest_text
 from app.tools.calendar import get_auth_url, exchange_code, save_tokens
 from app.tools.notion_import import run_notion_import
+from app.agents.news_agent_base import run_tech_news_agent, run_qsr_news_agent, run_finance_news_agent
+from app.agents.stock_screener_agent import run_stock_screener_agent
 from app.tools.calendar_tools import set_current_chat_id
 
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +71,66 @@ async def google_callback(code: str, state: str = ""):
     except Exception as e:
         logger.error(f"Error OAuth: {e}")
         return HTMLResponse(f"<h2>Error al conectar: {str(e)}</h2>")
+
+@app.post("/agents/tech-news")
+async def tech_news_endpoint(request: Request, background_tasks: BackgroundTasks):
+    """Endpoint para Make — ejecuta el agente de noticias y manda el resultado a Telegram."""
+    data = await request.json()
+    chat_id = str(data.get("chat_id", ""))
+    if not chat_id:
+        return {"error": "chat_id requerido"}
+
+    async def handle():
+        await send_message(chat_id, "📰 Buscando noticias de tecnología del día...")
+        result = run_tech_news_agent()
+        await send_message(chat_id, result)
+
+    background_tasks.add_task(handle)
+    return {"ok": True}
+
+@app.post("/agents/qsr-news")
+async def qsr_news_endpoint(request: Request, background_tasks: BackgroundTasks):
+    """Endpoint para Make — noticias QSR del día."""
+    data = await request.json()
+    chat_id = str(data.get("chat_id", ""))
+    if not chat_id:
+        return {"error": "chat_id requerido"}
+    async def handle():
+        await send_message(chat_id, "🍔 Buscando noticias de QSR del día...")
+        result = run_qsr_news_agent()
+        await send_message(chat_id, result)
+    background_tasks.add_task(handle)
+    return {"ok": True}
+
+@app.post("/agents/finance-news")
+async def finance_news_endpoint(request: Request, background_tasks: BackgroundTasks):
+    """Endpoint para Make — noticias de finanzas y macro del día."""
+    data = await request.json()
+    chat_id = str(data.get("chat_id", ""))
+    if not chat_id:
+        return {"error": "chat_id requerido"}
+    async def handle():
+        await send_message(chat_id, "💹 Buscando noticias de finanzas del día...")
+        result = run_finance_news_agent()
+        await send_message(chat_id, result)
+    background_tasks.add_task(handle)
+    return {"ok": True}
+
+@app.post("/agents/stock-screener")
+async def stock_screener_endpoint(request: Request, background_tasks: BackgroundTasks):
+    """Endpoint para Make — ejecuta el screener de acciones y manda el resultado a Telegram."""
+    data = await request.json()
+    chat_id = str(data.get("chat_id", ""))
+    if not chat_id:
+        return {"error": "chat_id requerido"}
+
+    async def handle():
+        await send_message(chat_id, "📈 Analizando acciones... puede tardar 1-2 minutos.")
+        result = run_stock_screener_agent()
+        await send_message(chat_id, result)
+
+    background_tasks.add_task(handle)
+    return {"ok": True}
 
 @app.post("/telegram/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
