@@ -164,6 +164,48 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             background_tasks.add_task(handle_document)
             return {"ok": True}
 
+        # Imagen / Screenshot
+        photos = message.get("photo", [])
+        if photos:
+            async def handle_photo():
+                await send_message(chat_id, "📸 Analizando imagen...")
+                try:
+                    import base64
+                    from anthropic import Anthropic
+                    best_photo = max(photos, key=lambda p: p.get("file_size", 0))
+                    image_bytes = await download_telegram_file(best_photo["file_id"])
+                    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+                    # Analizar con Claude vision
+                    anthropic_client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+                    prompt = caption if caption else "Analizá esta imagen. Si es un board de Azure DevOps, describí el estado de los features y OKRs. Si es otro tipo de imagen, describí su contenido relevante para el contexto de CTO."
+                    response = anthropic_client.messages.create(
+                        model="claude-opus-4-5",
+                        max_tokens=1024,
+                        messages=[{
+                            "role": "user",
+                            "content": [
+                                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
+                                {"type": "text", "text": prompt}
+                            ]
+                        }]
+                    )
+                    analysis = response.content[0].text
+
+                    # Ingestar análisis en knowledge base
+                    ingest_text(analysis, source="azure_screenshot", type="image")
+
+                    # Procesar con el agente
+                    full_message = f"[Análisis de imagen/screenshot]:\n{analysis}"
+                    set_current_chat_id(chat_id)
+                    agent_response = process_message(chat_id, full_message)
+                    await send_message(chat_id, agent_response)
+                except Exception as e:
+                    logger.error(f"Error en imagen: {e}", exc_info=True)
+                    await send_message(chat_id, "⚠️ Error procesando la imagen.")
+            background_tasks.add_task(handle_photo)
+            return {"ok": True}
+
         # Texto
         if text:
             async def handle_text():
