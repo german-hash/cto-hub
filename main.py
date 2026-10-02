@@ -13,6 +13,7 @@ from app.tools.memory import reset_history
 from app.tools.ingest import transcribe_audio, download_telegram_file, extract_text_from_document
 from app.tools.rag import ingest_text
 from app.tools.calendar import get_auth_url, exchange_code, save_tokens
+from app.tools.notion_import import run_notion_import
 from app.tools.calendar_tools import set_current_chat_id
 
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +32,7 @@ HELP_TEXT = """🤖 CTO Hub — Comandos
 
 /reset — Borra historial
 /conectar_calendar — Conecta Google Calendar
+/importar_notion — Importa historial de Notion a la knowledge base
 /help — Esta ayuda
 
 Funciones:
@@ -104,6 +106,20 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             _oauth_state[state] = chat_id
             auth_url = get_auth_url() + f"&state={state}"
             await send_message(chat_id, f"📅 Hacé click para conectar Google Calendar:\n{auth_url}")
+            return {"ok": True}
+
+        if text.lower() == "/importar_notion":
+            async def handle_import():
+                await send_message(chat_id, "📥 Importando Notion... puede tardar 1-2 minutos.")
+                try:
+                    results = run_notion_import()
+                    ok = ", ".join(results["success"])
+                    failed = ", ".join(results["failed"]) if results["failed"] else "ninguna"
+                    await send_message(chat_id, f"✅ Importación completa\n• Páginas: {len(results['success'])}\n• Chunks: {results['chunks_total']}\n• Fallidas: {failed}")
+                except Exception as e:
+                    logger.error(f"Error importando Notion: {e}", exc_info=True)
+                    await send_message(chat_id, f"⚠️ Error en la importación: {str(e)}")
+            background_tasks.add_task(handle_import)
             return {"ok": True}
 
         # Voz
