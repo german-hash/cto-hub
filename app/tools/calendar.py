@@ -1,19 +1,14 @@
 import os
-import json
 import httpx
 from datetime import datetime, timedelta
-from langchain_core.tools import tool
+from app.tools.supabase_client import supabase, _retry
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
 REDIRECT_URI = "https://cto-hub.onrender.com/auth/google/callback"
 SCOPES = "https://www.googleapis.com/auth/calendar.readonly"
 
-# Token se guarda en memoria (en producción usarías Supabase)
-_token_store: dict = {}
-
 def get_auth_url() -> str:
-    """Genera la URL de autorización de Google OAuth."""
     return (
         f"https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={GOOGLE_CLIENT_ID}"
@@ -25,7 +20,6 @@ def get_auth_url() -> str:
     )
 
 async def exchange_code(code: str) -> dict:
-    """Intercambia el código OAuth por tokens."""
     async with httpx.AsyncClient() as client:
         r = await client.post("https://oauth2.googleapis.com/token", data={
             "code": code,
@@ -37,8 +31,7 @@ async def exchange_code(code: str) -> dict:
         r.raise_for_status()
         return r.json()
 
-async def refresh_token(refresh_tok: str) -> str:
-    """Refresca el access token."""
+async def _refresh_access_token(refresh_tok: str) -> str:
     async with httpx.AsyncClient() as client:
         r = await client.post("https://oauth2.googleapis.com/token", data={
             "refresh_token": refresh_tok,
@@ -50,74 +43,81 @@ async def refresh_token(refresh_tok: str) -> str:
         return r.json()["access_token"]
 
 def save_tokens(chat_id: str, tokens: dict):
-    _token_store[chat_id] = tokens
+    """Guarda tokens en Supabase."""
+    def _fn():
+        supabase.table("google_tokens").upsert({
+            "chat_id": chat_id,
+            "access_token": tokens.get("access_token", ""),
+            "refresh_token": tokens.get("refresh_token", ""),
+            "updated_at": "now()"
+        }).execute()
+    _retry(_fn)
+
+def get_tokens(chat_id: str) -> dict | None:
+    """Lee tokens desde Supabase."""
+    def _fn():
+        result = supabase.table("google_tokens") \
+            .select("access_token, refresh_token") \
+            .eq("chat_id", chat_id) \
+            .execute()
+        return result.data[0] if result.data else None
+    try:
+        return _retry(_fn)
+    except Exception:
+        return None
 
 def get_access_token(chat_id: str) -> str | None:
-    tokens = _token_store.get(chat_id)
-    if not tokens:
-        return None
-    return tokens.get("access_token")
-
-def get_refresh_token(chat_id: str) -> str | None:
-    tokens = _token_store.get(chat_id)
-    if not tokens:
-        return None
-    return tokens.get("refresh_token")
+    tokens = get_tokens(chat_id)
+    return tokens.get("access_token") if tokens else None
 
 async def get_calendar_events(chat_id: str, days: int = 7) -> list[dict]:
-    """Trae los eventos del calendario de los próximos N días."""
-    access_token = get_access_token(chat_id)
-    if not access_token:
+    tokens = get_tokens(chat_id)
+    if not tokens:
         return []
+
+    access_token = tokens["access_token"]
+    refresh_tok = tokens.get("refresh_token", "")
 
     now = datetime.utcnow()
     time_min = now.isoformat() + "Z"
     time_max = (now + timedelta(days=days)).isoformat() + "Z"
 
+    params = {
+        "timeMin": time_min,
+        "timeMax": time_max,
+        "singleEvents": True,
+        "orderBy": "startTime",
+        "maxResults": 20
+    }
+
     async with httpx.AsyncClient() as client:
         r = await client.get(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events",
             headers={"Authorization": f"Bearer {access_token}"},
-            params={
-                "timeMin": time_min,
-                "timeMax": time_max,
-                "singleEvents": True,
-                "orderBy": "startTime",
-                "maxResults": 20
-            }
+            params=params
         )
-        if r.status_code == 401:
-            # Token expirado, refrescar
-            refresh_tok = get_refresh_token(chat_id)
-            if refresh_tok:
-                new_token = await refresh_token(refresh_tok)
-                _token_store[chat_id]["access_token"] = new_token
-                r = await client.get(
-                    "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-                    headers={"Authorization": f"Bearer {new_token}"},
-                    params={
-                        "timeMin": time_min,
-                        "timeMax": time_max,
-                        "singleEvents": True,
-                        "orderBy": "startTime",
-                        "maxResults": 20
-                    }
-                )
+        if r.status_code == 401 and refresh_tok:
+            access_token = await _refresh_access_token(refresh_tok)
+            save_tokens(chat_id, {"access_token": access_token, "refresh_token": refresh_tok})
+            r = await client.get(
+                "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params
+            )
         r.raise_for_status()
         return r.json().get("items", [])
 
 def format_events(events: list[dict]) -> str:
-    """Formatea eventos del calendario para Telegram."""
     if not events:
         return "No tenés eventos en los próximos días."
-    
+
     lines = []
     current_date = None
-    
+
     for event in events:
         start = event.get("start", {})
         date_str = start.get("dateTime", start.get("date", ""))
-        
+
         if "T" in date_str:
             dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
             date_label = dt.strftime("%a %d/%m")
@@ -126,12 +126,12 @@ def format_events(events: list[dict]) -> str:
             dt = datetime.strptime(date_str, "%Y-%m-%d")
             date_label = dt.strftime("%a %d/%m")
             time_label = "Todo el día"
-        
+
         if date_label != current_date:
             lines.append(f"\n📅 {date_label}")
             current_date = date_label
-        
+
         title = event.get("summary", "Sin título")
         lines.append(f"  {time_label} — {title}")
-    
+
     return "Agenda:" + "\n".join(lines)

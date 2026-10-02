@@ -1,6 +1,10 @@
+import asyncio
+import logging
 from langchain_core.tools import tool
+from app.tools.calendar import get_calendar_events, format_events, get_access_token
 
-# chat_id global para las tools (se setea antes de llamar al agente)
+logger = logging.getLogger(__name__)
+
 _current_chat_id = ""
 
 def set_current_chat_id(chat_id: str):
@@ -11,18 +15,18 @@ def set_current_chat_id(chat_id: str):
 def get_agenda(days: int = 7) -> str:
     """
     Trae los eventos del Google Calendar de los próximos días.
-    Usá esta tool cuando alguien pregunta por su agenda, reuniones o calendario.
+    Usá cuando alguien pregunta por su agenda, reuniones o calendario.
     """
-    import asyncio
-    from app.tools.calendar import get_calendar_events, format_events, get_access_token
-
     if not get_access_token(_current_chat_id):
-        return "⚠️ No está conectado Google Calendar. Mandá /conectar_calendar para autorizarlo."
-
+        return "⚠️ Google Calendar no está conectado. Mandá /conectar_calendar para autorizarlo."
     try:
-        events = asyncio.run(get_calendar_events(_current_chat_id, days))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        events = loop.run_until_complete(get_calendar_events(_current_chat_id, days))
+        loop.close()
         return format_events(events)
     except Exception as e:
+        logger.error(f"Error leyendo calendario: {e}", exc_info=True)
         return f"Error al leer el calendario: {str(e)}"
 
 @tool
