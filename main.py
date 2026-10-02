@@ -46,12 +46,16 @@ Funciones:
 """
 
 async def send_message(chat_id: str, text: str):
+    """Envía mensaje a Telegram dividiendo si supera el límite de 4096 chars."""
+    MAX_LEN = 4000
+    chunks = [text[i:i+MAX_LEN] for i in range(0, len(text), MAX_LEN)]
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{TELEGRAM_API}/sendMessage", json={
-            "chat_id": chat_id,
-            "text": text
-        })
-        logger.info(f"Telegram: {r.status_code}")
+        for chunk in chunks:
+            r = await client.post(f"{TELEGRAM_API}/sendMessage", json={
+                "chat_id": chat_id,
+                "text": chunk
+            })
+            logger.info(f"Telegram: {r.status_code}")
 
 @app.get("/health")
 def health():
@@ -73,48 +77,22 @@ async def google_callback(code: str, state: str = ""):
         return HTMLResponse(f"<h2>Error al conectar: {str(e)}</h2>")
 
 @app.post("/agents/tech-news")
-async def tech_news_endpoint(request: Request, background_tasks: BackgroundTasks):
-    """Endpoint para Make — ejecuta el agente de noticias y manda el resultado a Telegram."""
-    data = await request.json()
-    chat_id = str(data.get("chat_id", ""))
-    if not chat_id:
-        return {"error": "chat_id requerido"}
-
-    async def handle():
-        await send_message(chat_id, "📰 Buscando noticias de tecnología del día...")
-        result = run_tech_news_agent()
-        await send_message(chat_id, result)
-
-    background_tasks.add_task(handle)
-    return {"ok": True}
+async def tech_news_endpoint(request: Request):
+    """Endpoint para Make — devuelve texto de noticias tech para que Make haga TTS."""
+    result = run_tech_news_agent()
+    return {"ok": True, "text": result}
 
 @app.post("/agents/qsr-news")
-async def qsr_news_endpoint(request: Request, background_tasks: BackgroundTasks):
-    """Endpoint para Make — noticias QSR del día."""
-    data = await request.json()
-    chat_id = str(data.get("chat_id", ""))
-    if not chat_id:
-        return {"error": "chat_id requerido"}
-    async def handle():
-        await send_message(chat_id, "🍔 Buscando noticias de QSR del día...")
-        result = run_qsr_news_agent()
-        await send_message(chat_id, result)
-    background_tasks.add_task(handle)
-    return {"ok": True}
+async def qsr_news_endpoint(request: Request):
+    """Endpoint para Make — devuelve texto de noticias QSR para que Make haga TTS."""
+    result = run_qsr_news_agent()
+    return {"ok": True, "text": result}
 
 @app.post("/agents/finance-news")
-async def finance_news_endpoint(request: Request, background_tasks: BackgroundTasks):
-    """Endpoint para Make — noticias de finanzas y macro del día."""
-    data = await request.json()
-    chat_id = str(data.get("chat_id", ""))
-    if not chat_id:
-        return {"error": "chat_id requerido"}
-    async def handle():
-        await send_message(chat_id, "💹 Buscando noticias de finanzas del día...")
-        result = run_finance_news_agent()
-        await send_message(chat_id, result)
-    background_tasks.add_task(handle)
-    return {"ok": True}
+async def finance_news_endpoint(request: Request):
+    """Endpoint para Make — devuelve texto de noticias finanzas para que Make haga TTS."""
+    result = run_finance_news_agent()
+    return {"ok": True, "text": result}
 
 @app.post("/agents/stock-screener")
 async def stock_screener_endpoint(request: Request, background_tasks: BackgroundTasks):
