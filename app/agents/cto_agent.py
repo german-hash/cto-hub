@@ -72,7 +72,7 @@ def run_cto_agent(messages: list[dict], memory: str = "") -> str:
 
     for i in range(5):
         response = llm.invoke(lc_messages)
-        logger.info(f"Iteración {i} — stop_reason: {response.stop_reason}, tool_calls: {len(response.tool_calls)}, content len: {len(str(response.content))}")
+        logger.info(f"Iteración {i} — tool_calls: {len(response.tool_calls)}, content len: {len(str(response.content))}")
 
         if not response.tool_calls:
             text = response.content
