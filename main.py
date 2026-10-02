@@ -76,17 +76,30 @@ async def google_callback(code: str, state: str = ""):
         logger.error(f"Error OAuth: {e}")
         return HTMLResponse(f"<h2>Error al conectar: {str(e)}</h2>")
 
-@app.post("/agents/tech-news")
-async def tech_news_endpoint(request: Request):
-    """Endpoint para Make — devuelve texto de noticias tech para que Make haga TTS."""
+@app.get("/agents/tech-news")
+async def tech_news_endpoint():
+    """Endpoint para Make — devuelve noticias tech para TTS."""
     result = run_tech_news_agent()
-    return {"ok": True, "text": result}
+    return {"noticias": result}
+
+@app.get("/agents/qsr-news-get")
+async def qsr_news_get():
+    """Endpoint GET para Make — devuelve noticias QSR para TTS."""
+    result = run_qsr_news_agent()
+    return {"noticias": result}
 
 @app.post("/agents/qsr-news")
-async def qsr_news_endpoint(request: Request):
-    """Endpoint para Make — devuelve texto de noticias QSR para que Make haga TTS."""
-    result = run_qsr_news_agent()
-    return {"ok": True, "text": result}
+async def qsr_news_endpoint(request: Request, background_tasks: BackgroundTasks):
+    """Endpoint POST para Make — manda noticias QSR directo a Telegram."""
+    data = await request.json()
+    chat_id = str(data.get("chat_id", ""))
+    if not chat_id:
+        return {"error": "chat_id requerido"}
+    async def handle():
+        result = run_qsr_news_agent()
+        await send_message(chat_id, result)
+    background_tasks.add_task(handle)
+    return {"ok": True}
 
 @app.post("/agents/finance-news")
 async def finance_news_endpoint(request: Request):
