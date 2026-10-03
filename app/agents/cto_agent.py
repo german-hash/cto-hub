@@ -6,6 +6,7 @@ from app.tools.memory import save_memory, get_memory
 from app.tools.crud import ALL_TOOLS
 from app.tools.rag import search_knowledge, ingest_to_knowledge_base
 from app.tools.calendar_tools import get_agenda, get_today_agenda
+from app.tools.granola import list_granola_meetings, get_granola_meeting
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ Tu rol es ayudarlo a gestionar su equipo, proyectos, decisiones técnicas y comu
 == CÓMO OPERAR ==
 - Respondé en español rioplatense, directo y práctico
 - Cuando alguien pregunta sobre agenda, reuniones o calendario, usá get_agenda o get_today_agenda
+- Cuando alguien pregunta por reuniones de Granola o notas recientes, usá list_granola_meetings y get_granola_meeting
 - SIEMPRE que alguien pregunte sobre un tema específico, usá search_knowledge primero
 - Cuando alguien menciona una reunión o 1:1, ofrecé registrarla con create_one_on_one
 - Cuando detectás un pendiente o tarea, ofrecé registrarla con create_task
@@ -52,7 +54,8 @@ Tu rol es ayudarlo a gestionar su equipo, proyectos, decisiones técnicas y comu
 """
 
 TOOLS = [save_memory, get_memory, search_knowledge, ingest_to_knowledge_base,
-         get_agenda, get_today_agenda] + ALL_TOOLS
+         get_agenda, get_today_agenda,
+         list_granola_meetings, get_granola_meeting] + ALL_TOOLS
 TOOL_MAP = {t.name: t for t in TOOLS}
 
 llm = ChatAnthropic(
