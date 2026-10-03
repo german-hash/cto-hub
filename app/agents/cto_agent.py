@@ -75,7 +75,7 @@ def run_cto_agent(messages: list[dict], memory: str = "") -> str:
             if isinstance(content, str) and content.strip():
                 lc_messages.append(AIMessage(content=content))
 
-    for i in range(5):
+    for i in range(10):
         response = llm.invoke(lc_messages)
         logger.info(f"Iteración {i} — tool_calls: {len(response.tool_calls)}, content len: {len(str(response.content))}")
 
