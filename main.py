@@ -88,11 +88,11 @@ async def qsr_news_endpoint():
     result = run_qsr_news_agent()
     return result
 
-@app.post("/agents/finance-news")
-async def finance_news_endpoint(request: Request):
-    """Endpoint para Make — devuelve texto de noticias finanzas para que Make haga TTS."""
+@app.get("/agents/finance-news")
+async def finance_news_endpoint():
+    """Endpoint GET para Make — devuelve noticias finanzas + fuentes para TTS."""
     result = run_finance_news_agent()
-    return {"ok": True, "text": result}
+    return result
 
 @app.post("/agents/stock-screener")
 async def stock_screener_endpoint(request: Request, background_tasks: BackgroundTasks):
