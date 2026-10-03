@@ -143,18 +143,20 @@ async def granola_webhook(request: Request, background_tasks: BackgroundTasks):
             # Buscar el contenido completo via API de Granola
             async with httpx.AsyncClient(timeout=15) as client:
                 r = await client.get(
-                    f"https://api.granola.ai/v1/notes/{note_id}",
-                    headers={"Authorization": f"Bearer {GRANOLA_API_KEY}"}
+                    f"https://public-api.granola.ai/v1/notes/{note_id}",
+                    headers={"Authorization": f"Bearer {GRANOLA_API_KEY}"},
+                params={"include": "transcript"}
                 )
                 if r.status_code != 200:
                     logger.error(f"Granola API error: {r.status_code} {r.text[:200]}")
                     return
                 note = r.json()
 
-            title = note.get("title", "Reunión sin título")
-            notes = note.get("notes", "") or note.get("summary", "") or note.get("content", "")
-            transcript = note.get("transcript", "")
-            created_at = note.get("created_at", "") or note.get("date", "")
+            title = note.get("title") or "Reunión sin título"
+            notes = note.get("summary_markdown") or note.get("summary_text") or note.get("notes", "")
+            transcript_data = note.get("transcript") or {}
+            transcript = transcript_data.get("text", "") if isinstance(transcript_data, dict) else str(transcript_data)
+            created_at = note.get("created_at", "")[:10] if note.get("created_at") else ""
 
             if not notes and not transcript:
                 logger.warning(f"Granola: nota '{title}' vacía, ignorando")
