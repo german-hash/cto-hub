@@ -113,6 +113,72 @@ async def stock_screener_endpoint(request: Request, background_tasks: Background
     background_tasks.add_task(handle)
     return {"ok": True}
 
+# ── Granola Webhook ──────────────────────────────────────────────────────────
+
+@app.post("/webhooks/granola")
+async def granola_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Recibe eventos de Granola, busca el contenido completo via API y lo ingesta."""
+    try:
+        data = await request.json()
+        logger.info(f"Granola webhook: {data}")
+
+        async def handle():
+            import httpx
+            from app.tools.rag import ingest_text
+
+            GRANOLA_API_KEY = os.environ.get("GRANOLA_API_KEY", "")
+            if not GRANOLA_API_KEY:
+                logger.error("GRANOLA_API_KEY no configurada")
+                return
+
+            # Obtener el note_id del evento
+            note_id = (data.get("note_id") or data.get("id") or
+                      data.get("data", {}).get("note_id") or
+                      data.get("data", {}).get("id"))
+
+            if not note_id:
+                logger.warning(f"Granola webhook: no encontré note_id en {data}")
+                return
+
+            # Buscar el contenido completo via API de Granola
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(
+                    f"https://api.granola.ai/v1/notes/{note_id}",
+                    headers={"Authorization": f"Bearer {GRANOLA_API_KEY}"}
+                )
+                if r.status_code != 200:
+                    logger.error(f"Granola API error: {r.status_code} {r.text[:200]}")
+                    return
+                note = r.json()
+
+            title = note.get("title", "Reunión sin título")
+            notes = note.get("notes", "") or note.get("summary", "") or note.get("content", "")
+            transcript = note.get("transcript", "")
+            created_at = note.get("created_at", "") or note.get("date", "")
+
+            if not notes and not transcript:
+                logger.warning(f"Granola: nota '{title}' vacía, ignorando")
+                return
+
+            text_parts = [f"Reunión: {title}"]
+            if created_at:
+                text_parts.append(f"Fecha: {created_at}")
+            if notes:
+                text_parts.append(f"Notas:\n{notes}")
+            if transcript:
+                text_parts.append(f"Transcripción:\n{transcript[:3000]}")
+
+            full_text = "\n\n".join(text_parts)
+            chunks = ingest_text(full_text, source=f"granola/{title}", type="meeting")
+            logger.info(f"Granola: ingresté '{title}' — {chunks} chunks")
+
+        background_tasks.add_task(handle)
+        return {"ok": True}
+
+    except Exception as e:
+        logger.error(f"Error en Granola webhook: {e}", exc_info=True)
+        return {"ok": True}
+
 # ── Dashboard ────────────────────────────────────────────────────────────────
 
 @app.get("/dashboard", response_class=HTMLResponse)
