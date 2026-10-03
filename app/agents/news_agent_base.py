@@ -63,8 +63,8 @@ def run_news_agent(topic: str, system_prompt: str) -> str:
     return "No pude obtener las noticias."
 
 
-def run_tech_news_agent() -> str:
-    return run_news_agent("tecnologia", """Eres un agente especializado en noticias de tecnologia.
+def run_tech_news_agent() -> dict:
+    texto = run_news_agent("tecnologia", """Eres un agente especializado en noticias de tecnologia.
 Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
 - Solo mostras noticias de los ultimos 7 dias
@@ -75,11 +75,25 @@ IMPORTANTE:
 - Cada noticia debe tener: titulo, resumen de 2 lineas y fuente
 - Separas cada noticia con un punto y aparte
 - El texto total no debe superar los 3500 caracteres
+- Al final del texto agrega una seccion separada con el texto exacto:
+  FUENTES_INICIO
+  luego una linea por cada fuente en formato: Titulo - URL
+  luego el texto exacto: FUENTES_FIN
 - Respondes siempre en español""")
 
+    if "FUENTES_INICIO" in texto and "FUENTES_FIN" in texto:
+        partes = texto.split("FUENTES_INICIO")
+        texto_audio = partes[0].strip()
+        fuentes = partes[1].split("FUENTES_FIN")[0].strip()
+    else:
+        texto_audio = texto
+        fuentes = "No se encontraron fuentes"
 
-def run_qsr_news_agent() -> str:
-    return run_news_agent("QSR (Quick Service Restaurants)", """Eres un agente especializado en noticias de QSR.
+    return {"noticias": texto_audio, "fuentes": fuentes}
+
+
+def run_qsr_news_agent() -> dict:
+    texto = run_news_agent("QSR (Quick Service Restaurants)", """Eres un agente especializado en noticias de QSR.
 Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
 - Solo mostras noticias de los ultimos 7 dias
@@ -90,7 +104,23 @@ IMPORTANTE:
 - Cada noticia debe tener: titulo, resumen de 2 lineas y fuente
 - Separas cada noticia con un punto y aparte
 - El texto total no debe superar los 3500 caracteres
+- Priorizas noticias de digitalizacion y ecommerce
+- Priorizas noticias de cadenas globales como McDonalds, Starbucks, Burger King, KFC, Subway, Pizza Hut, Dominos, y cadenas relevantes en latinoamerica
+- Al final del texto agrega una seccion separada con el texto exacto:
+  FUENTES_INICIO
+  luego una linea por cada fuente en formato: Titulo - URL
+  luego el texto exacto: FUENTES_FIN
 - Respondes siempre en español""")
+
+    if "FUENTES_INICIO" in texto and "FUENTES_FIN" in texto:
+        partes = texto.split("FUENTES_INICIO")
+        texto_audio = partes[0].strip()
+        fuentes = partes[1].split("FUENTES_FIN")[0].strip()
+    else:
+        texto_audio = texto
+        fuentes = "No se encontraron fuentes"
+
+    return {"noticias": texto_audio, "fuentes": fuentes}
 
 
 def run_finance_news_agent() -> str:

@@ -78,15 +78,15 @@ async def google_callback(code: str, state: str = ""):
 
 @app.get("/agents/tech-news")
 async def tech_news_endpoint():
-    """Endpoint GET para Make — devuelve noticias tech para TTS."""
+    """Endpoint GET para Make — devuelve noticias tech + fuentes para TTS."""
     result = run_tech_news_agent()
-    return {"noticias": result}
+    return result
 
 @app.get("/agents/qsr-news")
 async def qsr_news_endpoint():
-    """Endpoint GET para Make — devuelve noticias QSR para TTS."""
+    """Endpoint GET para Make — devuelve noticias QSR + fuentes para TTS."""
     result = run_qsr_news_agent()
-    return {"noticias": result}
+    return result
 
 @app.post("/agents/finance-news")
 async def finance_news_endpoint(request: Request):
