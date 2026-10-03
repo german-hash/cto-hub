@@ -47,7 +47,11 @@ def get_granola_meeting(note_id: str) -> str:
     if not GRANOLA_API_KEY:
         return "⚠️ Granola no está configurado."
     try:
-        note = _granola_get(f"/notes/{note_id}", {"include": "transcript"})
+        # Intentar con transcript primero, si falla sin él
+        try:
+            note = _granola_get(f"/notes/{note_id}", {"include": "transcript"})
+        except httpx.HTTPStatusError:
+            note = _granola_get(f"/notes/{note_id}")
         title = note.get("title") or "Sin título"
         date = (note.get("created_at") or "")[:10]
         summary = note.get("summary_markdown") or note.get("summary_text") or "Sin resumen."
@@ -58,5 +62,9 @@ def get_granola_meeting(note_id: str) -> str:
             lines.append(f"Participantes: {', '.join(attendees)}")
         lines.append(f"\n{summary}")
         return "\n".join(lines)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (400, 404):
+            return f"⚠️ La nota no tiene resumen generado por Granola todavía, o no se procesó completamente. Probá con otra reunión."
+        return f"Error al obtener la nota: {str(e)}"
     except Exception as e:
         return f"Error al obtener la nota: {str(e)}"
