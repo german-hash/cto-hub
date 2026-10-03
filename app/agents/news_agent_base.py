@@ -10,20 +10,20 @@ def run_news_agent(topic: str, system_prompt: str) -> str:
 
     tools = [{
         "name": "buscar_noticias",
-        "description": f"Busca noticias recientes sobre {topic} en internet",
+        "description": f"Busca noticias recientes de {topic} en internet",
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Término de búsqueda"}
+                "query": {"type": "string", "description": "El término de búsqueda"}
             },
             "required": ["query"]
         }
     }]
 
-    hoy = date.today().strftime("%d %B %Y")
-    messages = [{"role": "user", "content": f"¿Cuáles son las noticias de {topic} del día de hoy {hoy}?"}]
+    hoy_query = date.today().strftime("%d %B %Y")
+    messages = [{"role": "user", "content": f"Cuales son las noticias de {topic} de la semana {hoy_query}?"}]
 
-    for _ in range(5):
+    while True:
         response = client.messages.create(
             model="claude-opus-4-5",
             max_tokens=2048,
@@ -42,11 +42,11 @@ def run_news_agent(topic: str, system_prompt: str) -> str:
                         search_depth="advanced",
                         max_results=5,
                         include_raw_content=False,
-                        days=1
+                        days=7
                     )
                     noticias_texto = ""
                     for r in resultado["results"]:
-                        noticias_texto += f"- Título: {r['title']}\n  Resumen: {r['content'][:300]}\n  Fuente: {r['url']}\n\n"
+                        noticias_texto += f"- Titulo: {r['title']}\n  Resumen: {r['content'][:300]}\n  Fuente: {r['url']}\n\n"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -58,41 +58,51 @@ def run_news_agent(topic: str, system_prompt: str) -> str:
             for block in response.content:
                 if hasattr(block, "text"):
                     return block.text
+            break
 
-    return f"No pude obtener las noticias de {topic} del día."
+    return "No pude obtener las noticias."
 
 
 def run_tech_news_agent() -> str:
-    hoy = date.today().strftime("%d/%m/%Y")
-    return run_news_agent("tecnología", f"""Eres un agente especializado en noticias de tecnología.
-Cuando el usuario te pida noticias, usás la tool buscar_noticias para buscar información actualizada.
+    return run_news_agent("tecnologia", """Eres un agente especializado en noticias de tecnologia.
+Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
-- Solo mostrás noticias del día de hoy ({hoy})
-- Presentás MÍNIMO 5 noticias, idealmente 8 o más
-- Cada noticia debe tener: titular, resumen de 2-3 líneas y fuente
-- Organizalas por categorías: IA, Gadgets, Startups, Software, etc.
-- Respondés siempre en español.""")
+- Solo mostras noticias de los ultimos 7 dias
+- Presentas entre 8 y 10 noticias, entre 5 y 6 del mundo y entre 3 y 4 de latam
+- El texto debe estar escrito para ser LEIDO EN VOZ ALTA, sin markdown
+- No uses simbolos como #, *, **, ---, emojis ni caracteres especiales
+- Escribi en texto plano corrido, como un locutor de radio
+- Cada noticia debe tener: titulo, resumen de 2 lineas y fuente
+- Separas cada noticia con un punto y aparte
+- El texto total no debe superar los 3500 caracteres
+- Respondes siempre en español""")
 
 
 def run_qsr_news_agent() -> str:
-    hoy = date.today().strftime("%d/%m/%Y")
-    return run_news_agent("QSR (Quick Service Restaurants)", f"""Eres un agente especializado en noticias de QSR.
-Cuando el usuario te pida noticias, usás la tool buscar_noticias para buscar información actualizada.
+    return run_news_agent("QSR (Quick Service Restaurants)", """Eres un agente especializado en noticias de QSR.
+Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
-- Solo mostrás noticias del día de hoy ({hoy})
-- Presentás entre 5 y 8 noticias, priorizando noticias de Latam
-- Cada noticia debe tener: titular, resumen de 2-3 líneas y fuente
-- Organizalas por categorías: IA, Ecommerce, Tecnología, Tendencias, etc.
-- Respondés siempre en español.""")
+- Solo mostras noticias de los ultimos 7 dias
+- Presentas entre 8 y 10 noticias, entre 5 y 6 del mundo y entre 3 y 4 de latam
+- El texto debe estar escrito para ser LEIDO EN VOZ ALTA, sin markdown
+- No uses simbolos como #, *, **, ---, emojis ni caracteres especiales
+- Escribi en texto plano corrido, como un locutor de radio
+- Cada noticia debe tener: titulo, resumen de 2 lineas y fuente
+- Separas cada noticia con un punto y aparte
+- El texto total no debe superar los 3500 caracteres
+- Respondes siempre en español""")
 
 
 def run_finance_news_agent() -> str:
-    hoy = date.today().strftime("%d/%m/%Y")
-    return run_news_agent("finanzas y global macro", f"""Eres un agente especializado en noticias de finanzas y global macro.
-Cuando el usuario te pida noticias, usás la tool buscar_noticias para buscar información actualizada.
+    return run_news_agent("finanzas y global macro", """Eres un agente especializado en noticias de finanzas y global macro.
+Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
-- Solo mostrás noticias del día de hoy ({hoy})
-- Presentás entre 5 y 8 noticias, priorizando noticias de Latam
-- Cada noticia debe tener: titular, resumen de 2-3 líneas y fuente
-- Organizalas por categorías: económicas, políticas, mercados de valores, etc.
-- Respondés siempre en español.""")
+- Solo mostras noticias de los ultimos 7 dias
+- Presentas entre 8 y 10 noticias, entre 5 y 6 del mundo y entre 3 y 4 de latam
+- El texto debe estar escrito para ser LEIDO EN VOZ ALTA, sin markdown
+- No uses simbolos como #, *, **, ---, emojis ni caracteres especiales
+- Escribi en texto plano corrido, como un locutor de radio
+- Cada noticia debe tener: titulo, resumen de 2 lineas y fuente
+- Separas cada noticia con un punto y aparte
+- El texto total no debe superar los 3500 caracteres
+- Respondes siempre en español""")
