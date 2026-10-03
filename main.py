@@ -34,6 +34,7 @@ HELP_TEXT = """🤖 CTO Hub — Comandos
 
 /reset — Borra historial
 /conectar_calendar — Conecta Google Calendar
+/dashboard — Link al dashboard web
 /importar_notion — Importa historial de Notion a la knowledge base
 /help — Esta ayuda
 
@@ -138,6 +139,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
 
         if text.lower() == "/help":
             await send_message(chat_id, HELP_TEXT)
+            return {"ok": True}
+
+        if text.lower() == "/dashboard":
+            await send_message(chat_id, "📊 Dashboard: https://claude.ai/artifact/FSGyc1ubkmGMrtMMYvnkfe")
             return {"ok": True}
 
         if text.lower() == "/conectar_calendar":

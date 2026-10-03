@@ -1,0 +1,4 @@
+a git con Google login german@german...
+a supabase con GitHub de arriba
+a render con german@german..
+a api  de antropic con german@german..
