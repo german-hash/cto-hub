@@ -2,6 +2,8 @@ import os
 import logging
 import httpx
 from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi.responses import HTMLResponse
+from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
@@ -111,6 +113,48 @@ async def stock_screener_endpoint(request: Request, background_tasks: Background
     background_tasks.add_task(handle)
     return {"ok": True}
 
+# ── Dashboard ────────────────────────────────────────────────────────────────
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Sirve el dashboard HTML."""
+    html = Path("dashboard.html").read_text(encoding="utf-8")
+    return HTMLResponse(content=html)
+
+@app.get("/dashboard/data/tasks")
+async def dashboard_tasks():
+    from app.tools.supabase_client import supabase, _retry
+    def _fn():
+        return supabase.table("tasks").select("title,priority,related_person").eq("status", "pending").order("created_at", desc=True).limit(10).execute()
+    result = _retry(_fn)
+    return result.data
+
+@app.get("/dashboard/data/memory")
+async def dashboard_memory():
+    from app.tools.supabase_client import supabase, _retry
+    def _fn():
+        return supabase.table("cto_memory").select("category,content").order("created_at", desc=False).limit(20).execute()
+    result = _retry(_fn)
+    return result.data
+
+@app.get("/dashboard/data/oneononees")
+async def dashboard_oneononees():
+    from app.tools.supabase_client import supabase, _retry
+    def _fn():
+        return supabase.table("one_on_ones").select("person,date,topics").order("date", desc=True).limit(6).execute()
+    result = _retry(_fn)
+    return result.data
+
+@app.post("/dashboard/ask")
+async def dashboard_ask(request: Request):
+    data = await request.json()
+    message = data.get("message", "").strip()
+    if not message:
+        return {"response": "Mensaje vacío"}
+    from app.graph import process_message
+    response = process_message("dashboard", message)
+    return {"response": response}
+
 @app.post("/telegram/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -142,7 +186,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             return {"ok": True}
 
         if text.lower() == "/dashboard":
-            await send_message(chat_id, "📊 Dashboard: https://claude.ai/artifact/FSGyc1ubkmGMrtMMYvnkfe")
+            await send_message(chat_id, "📊 Dashboard: https://cto-hub.onrender.com/dashboard")
             return {"ok": True}
 
         if text.lower() == "/conectar_calendar":

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CTO Hub Dashboard</title>
+<style>
+  :root {
+    --bg: #0f0f13;
+    --surface: #1a1a24;
+    --border: #2a2a3a;
+    --text: #e8e8f0;
+    --muted: #7a7a9a;
+    --accent: #6c63ff;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: inherit; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+  .header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .subtitle { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px 24px; }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .card.full { grid-column: 1 / -1; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .card-count { background: var(--accent); color: white; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+  .task-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .task-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .task-priority { width: 6px; height: 6px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .p-high { background: var(--red); }
+  .p-medium { background: var(--yellow); }
+  .p-low { background: var(--green); }
+  .task-title { font-size: 13px; line-height: 1.4; flex: 1; }
+  .task-person { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .memory-item { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; line-height: 1.5; }
+  .memory-item:last-child { border-bottom: none; }
+  .memory-cat { font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+  .oneon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .oneon-item { padding: 10px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border); }
+  .oneon-person { font-weight: 600; font-size: 13px; }
+  .oneon-date { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .oneon-topics { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .topic-tag { background: var(--border); color: var(--muted); font-size: 11px; padding: 2px 8px; border-radius: 20px; }
+  .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 20px 0; }
+  .loading { color: var(--muted); font-size: 13px; text-align: center; padding: 20px 0; }
+  .ask-bar { padding: 0 24px 24px; }
+  .ask-input { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; color: var(--text); font-size: 14px; outline: none; transition: border-color .2s; }
+  .ask-input:focus { border-color: var(--accent); }
+  .ask-input::placeholder { color: var(--muted); }
+  .ask-btn { margin-top: 8px; background: var(--accent); color: white; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; transition: opacity .2s; }
+  .ask-btn:hover { opacity: .85; }
+  .ask-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .ask-response { margin-top: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; display: none; }
+  .refresh-btn { background: none; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 4px 10px; font-size: 11px; cursor: pointer; }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1><span class="status-dot"></span>CTO Hub</h1>
+    <div class="subtitle" id="last-update">Cargando...</div>
+  </div>
+  <button class="refresh-btn" onclick="loadAll()">↻ Actualizar</button>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">📋 Tareas pendientes</span>
+      <span class="card-count" id="task-count">-</span>
+    </div>
+    <div id="tasks-list"><div class="loading">Cargando...</div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">🧠 Memoria</span>
+      <span class="card-count" id="mem-count">-</span>
+    </div>
+    <div id="memory-list"><div class="loading">Cargando...</div></div>
+  </div>
+  <div class="card full">
+    <div class="card-header">
+      <span class="card-title">🤝 Últimos 1:1s</span>
+      <span class="card-count" id="oneon-count">-</span>
+    </div>
+    <div id="oneon-list"><div class="loading">Cargando...</div></div>
+  </div>
+</div>
+
+<div class="ask-bar">
+  <input class="ask-input" id="ask-input" type="text" placeholder="Preguntale algo al agente..." />
+  <button class="ask-btn" id="ask-btn" onclick="askAgent()">Preguntar al agente</button>
+  <div class="ask-response" id="ask-response"></div>
+</div>
+
+<script>
+async function apiFetch(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function renderTasks(tasks) {
+  document.getElementById('task-count').textContent = tasks.length;
+  const el = document.getElementById('tasks-list');
+  if (!tasks.length) { el.innerHTML = '<div class="empty">Sin tareas pendientes 🎉</div>'; return; }
+  el.innerHTML = tasks.map(t => `
+    <div class="task-item">
+      <div class="task-priority p-${t.priority || 'medium'}"></div>
+      <div>
+        <div class="task-title">${t.title}</div>
+        ${t.related_person ? `<div class="task-person">→ ${t.related_person}</div>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function renderMemory(items) {
+  document.getElementById('mem-count').textContent = items.length;
+  const el = document.getElementById('memory-list');
+  if (!items.length) { el.innerHTML = '<div class="empty">Sin memoria guardada</div>'; return; }
+  el.innerHTML = items.slice(0, 8).map(m => `
+    <div class="memory-item">
+      <div class="memory-cat">${m.category}</div>
+      ${m.content}
+    </div>`).join('');
+}
+
+function renderOneOnOnes(items) {
+  document.getElementById('oneon-count').textContent = items.length;
+  const el = document.getElementById('oneon-list');
+  if (!items.length) { el.innerHTML = '<div class="empty">Sin 1:1s registrados</div>'; return; }
+  el.innerHTML = `<div class="oneon-grid">` + items.slice(0, 6).map(o => `
+    <div class="oneon-item">
+      <div class="oneon-date">${new Date(o.date).toLocaleDateString('es-AR', {day:'2-digit', month:'short', year:'numeric'})}</div>
+      <div class="oneon-person">${o.person}</div>
+      <div class="oneon-topics">
+        ${(o.topics || []).slice(0,3).map(t => `<span class="topic-tag">${t}</span>`).join('')}
+      </div>
+    </div>`).join('') + '</div>';
+}
+
+async function loadAll() {
+  document.getElementById('last-update').textContent = 'Actualizando...';
+  try {
+    const [tasks, memory, oneOns] = await Promise.all([
+      apiFetch('/dashboard/data/tasks'),
+      apiFetch('/dashboard/data/memory'),
+      apiFetch('/dashboard/data/oneononees'),
+    ]);
+    renderTasks(tasks);
+    renderMemory(memory);
+    renderOneOnOnes(oneOns);
+    document.getElementById('last-update').textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-AR');
+  } catch(e) {
+    document.getElementById('last-update').textContent = 'Error al cargar — ' + e.message;
+  }
+}
+
+async function askAgent() {
+  const input = document.getElementById('ask-input');
+  const btn = document.getElementById('ask-btn');
+  const resp = document.getElementById('ask-response');
+  const q = input.value.trim();
+  if (!q) return;
+  btn.disabled = true;
+  btn.textContent = 'Pensando...';
+  resp.style.display = 'block';
+  resp.textContent = 'Consultando al agente...';
+  try {
+    const r = await fetch('/dashboard/ask', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: q})
+    });
+    const data = await r.json();
+    resp.textContent = data.response || 'Sin respuesta';
+  } catch(e) {
+    resp.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Preguntar al agente';
+  }
+}
+
+document.getElementById('ask-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') askAgent();
+});
+
+loadAll();
+</script>
+</body>
+</html>
