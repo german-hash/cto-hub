@@ -59,7 +59,7 @@ TOOLS = [save_memory, get_memory, search_knowledge, ingest_to_knowledge_base,
 TOOL_MAP = {t.name: t for t in TOOLS}
 
 llm = ChatAnthropic(
-    model="claude-opus-4-5",
+    model="claude-sonnet-5-5",
     api_key=os.environ.get("ANTHROPIC_API_KEY")
 ).bind_tools(TOOLS)
 

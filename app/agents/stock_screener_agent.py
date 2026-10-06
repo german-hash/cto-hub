@@ -84,7 +84,7 @@ def run_stock_screener_agent() -> str:
         resumen += f"FCF anterior: ${a['fcf_anterior']/1e9:.2f}B\n"
 
     response = client.messages.create(
-        model="claude-opus-4-5",
+        model="claude-haiku-4-5-20251001",
         max_tokens=2048,
         system="""Eres un analista financiero experto.
 Con los datos proporcionados, seleccionas las TOP 10 acciones del dia.
