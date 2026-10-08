@@ -67,13 +67,24 @@ def run_cto_agent(messages: list[dict], memory: str = "") -> str:
     system = SystemMessage(content=SYSTEM_PROMPT.format(memory=memory or "Sin memoria cargada."))
     lc_messages = [system]
 
+    # Filtrar mensajes válidos y asegurar que termine en usuario
+    valid_messages = []
     for m in messages:
         if m["role"] == "user":
-            lc_messages.append(HumanMessage(content=m["content"]))
+            # Ignorar tool results del historial (son JSON)
+            c = m["content"]
+            if isinstance(c, str) and c.strip() and not c.strip().startswith('[{'):
+                valid_messages.append(HumanMessage(content=c))
         elif m["role"] == "assistant":
-            content = m["content"]
-            if isinstance(content, str) and content.strip():
-                lc_messages.append(AIMessage(content=content))
+            c = m["content"]
+            if isinstance(c, str) and c.strip():
+                valid_messages.append(AIMessage(content=c))
+
+    # Asegurar que el historial no termine con assistant
+    while valid_messages and isinstance(valid_messages[-1], AIMessage):
+        valid_messages.pop()
+
+    lc_messages.extend(valid_messages)
 
     for i in range(10):
         response = llm.invoke(lc_messages)
