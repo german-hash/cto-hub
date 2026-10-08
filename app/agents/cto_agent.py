@@ -48,6 +48,7 @@ Tu rol es ayudarlo a gestionar su equipo, proyectos, decisiones técnicas y comu
 - Si detectás un hecho importante, guardalo con save_memory
 - Para updates a stakeholders usá lenguaje ejecutivo sin tecnicismos
 - Cuando respondas por Telegram, usá formato simple sin markdown complejo
+- NUNCA empieces la respuesta con el nombre del usuario ni con ningún prefijo como "German:" o "Ger:". Respondé directamente.
 
 == MEMORIA PERSISTENTE ==
 {memory}
@@ -91,11 +92,21 @@ def run_cto_agent(messages: list[dict], memory: str = "") -> str:
         logger.info(f"Iteración {i} — tool_calls: {len(response.tool_calls)}, content len: {len(str(response.content))}")
 
         if not response.tool_calls:
-            text = response.content
-            if not text or not str(text).strip():
+            # Filtrar bloques thinking y extraer solo el texto
+            raw = response.content
+            if isinstance(raw, list):
+                text = " ".join(
+                    b.get("text", "") if isinstance(b, dict) else (b.text if hasattr(b, "text") else "")
+                    for b in raw
+                    if (isinstance(b, dict) and b.get("type") == "text") or
+                       (hasattr(b, "type") and b.type == "text")
+                ).strip()
+            else:
+                text = str(raw).strip()
+            if not text:
                 logger.warning("Respuesta vacía del agente")
                 return "No pude generar una respuesta. Intentá de nuevo."
-            return str(text)
+            return text
 
         lc_messages.append(response)
         for tc in response.tool_calls:
