@@ -128,9 +128,14 @@ SYSTEM_PROMPT = """Sos el asistente del CTO de Tecnología Digital de Arcos Dora
 Te paso las notas de las reuniones de un día (de Granola). Armá un resumen ejecutivo en español rioplatense,
 directo y sin relleno.
 
-Respondé SIEMPRE llamando a la herramienta save_digest.
+Formato de respuesta (respetalo exacto, sin texto antes ni después):
+1) Primero el resumen para Telegram.
+2) Después una línea que diga solo: ===ACCIONABLES===
+3) Después un array JSON con los accionables:
+[{"title": "...", "owner": "nombre o vacío", "due_date": "YYYY-MM-DD o vacío", "priority": "low|medium|high", "meeting": "título de la reunión"}]
+Si no hay accionables, poné [].
 
-Reglas para "digest" (texto plano, SIN markdown: nada de **, #, ni _; podés usar emojis y saltos de línea):
+Reglas para el resumen (texto plano, SIN markdown: nada de **, #, ni _; podés usar emojis y saltos de línea):
 - Arrancá con "🗓️ Resumen de reuniones — DD/MM" y la cantidad de reuniones.
 - Por cada reunión: "▪️ Título (hora)" y 1 a 3 bullets "•" con lo importante.
 - Después una sección "✅ Decisiones" (solo si hubo).
@@ -138,46 +143,34 @@ Reglas para "digest" (texto plano, SIN markdown: nada de **, #, ni _; podés usa
 - Cerrá con "⚠️ Riesgos / temas abiertos" solo si hay algo que requiera atención del CTO.
 - Máximo ~2500 caracteres en total.
 
-Reglas para "action_items": solo compromisos concretos que surgen de las notas; no inventes responsables ni fechas.
-"title" corto e imperativo, máximo 80 caracteres (el detalle ya está en el digest).
+Reglas para el JSON de accionables: solo compromisos concretos que surgen de las notas; no inventes responsables ni fechas.
+"title" corto e imperativo, máximo 80 caracteres (el detalle ya está en el resumen).
 Prioridad high solo si hay urgencia o impacto explícito."""
 
-DIGEST_TOOL = {
-    "name": "save_digest",
-    "description": "Guarda el resumen diario de reuniones y sus accionables.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "digest": {"type": "string", "description": "Texto plano para Telegram"},
-            "action_items": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "title": {"type": "string", "maxLength": 120},
-                        "owner": {"type": "string"},
-                        "due_date": {"type": "string", "description": "YYYY-MM-DD o vacío"},
-                        "priority": {"type": "string", "enum": ["low", "medium", "high"]},
-                        "meeting": {"type": "string"},
-                    },
-                    "required": ["title"],
-                },
-            },
-        },
-        "required": ["digest", "action_items"],
-    },
-}
+DELIMITER = "===ACCIONABLES==="
 
 
-def _salvage_digest(raw: str) -> str:
-    """Si llega JSON roto/cortado, rescata el campo digest en vez de mandar JSON crudo."""
-    m = re.search(r'"digest"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.S)
-    if m:
+def _parse_action_items(raw: str) -> list[dict]:
+    """Parsea el array JSON de accionables. Si viene cortado, rescata los objetos completos."""
+    raw = raw.strip().strip("`").strip()
+    if raw.lower().startswith("json"):
+        raw = raw[4:].strip()
+    start = raw.find("[")
+    if start == -1:
+        return []
+    raw = raw[start:]
+    try:
+        data = json.loads(raw[: raw.rfind("]") + 1])
+        return [d for d in data if isinstance(d, dict)]
+    except Exception:
+        pass
+    items = []
+    for m in re.finditer(r"\{[^{}]*\}", raw):
         try:
-            return json.loads(f'"{m.group(1)}"')
+            items.append(json.loads(m.group(0)))
         except Exception:
-            return m.group(1).replace("\\n", "\n")
-    return raw
+            continue
+    return items
 
 
 def build_digest(day: date, notes_text: list[str]) -> dict:
@@ -187,23 +180,23 @@ def build_digest(day: date, notes_text: list[str]) -> dict:
         model=DIGEST_MODEL,
         max_tokens=8000,
         system=SYSTEM_PROMPT,
-        tools=[DIGEST_TOOL],
-        tool_choice={"type": "tool", "name": "save_digest"},
         messages=[{"role": "user", "content": user_msg}],
     )
     if resp.stop_reason == "max_tokens":
         logger.warning("Granola digest: respuesta cortada por max_tokens")
 
-    for block in resp.content:
-        if getattr(block, "type", "") == "tool_use" and isinstance(block.input, dict):
-            data = block.input
-            digest = (data.get("digest") or "").strip()
-            if digest:
-                return {"digest": digest, "action_items": data.get("action_items") or []}
+    # Solo bloques de texto (ignora thinking)
+    raw = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text").strip()
 
-    raw = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text")
-    logger.warning("Granola digest: sin tool_use válido, uso fallback de texto")
-    return {"digest": _salvage_digest(raw).strip() or "⚠️ No pude armar el resumen.", "action_items": []}
+    if DELIMITER in raw:
+        digest, actions_raw = raw.split(DELIMITER, 1)
+        action_items = _parse_action_items(actions_raw)
+    else:
+        logger.warning("Granola digest: no vino el delimitador de accionables")
+        digest, action_items = raw, []
+
+    digest = digest.strip().strip("`").strip()
+    return {"digest": digest or "⚠️ No pude armar el resumen.", "action_items": action_items}
 
 
 # ── Supabase ─────────────────────────────────────────────────────────────────
