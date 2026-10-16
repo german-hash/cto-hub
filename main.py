@@ -2,7 +2,8 @@ import os
 import logging
 import httpx
 from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -18,6 +19,7 @@ from app.tools.calendar import get_auth_url, exchange_code, save_tokens
 from app.tools.notion_import import run_notion_import
 from app.agents.news_agent_base import run_tech_news_agent, run_qsr_news_agent, run_finance_news_agent
 from app.agents.stock_screener_agent import run_stock_screener_agent
+from app.agents.granola_digest_agent import run_granola_digest
 from app.tools.calendar_tools import set_current_chat_id
 
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +40,7 @@ HELP_TEXT = """🤖 CTO Hub — Comandos
 /conectar_calendar — Conecta Google Calendar
 /dashboard — Link al dashboard web
 /importar_notion — Importa historial de Notion a la knowledge base
+/resumen_hoy — Resumen de las reuniones de hoy (Granola)
 /help — Esta ayuda
 
 Funciones:
@@ -108,6 +111,41 @@ async def stock_screener_endpoint(request: Request, background_tasks: Background
     async def handle():
         await send_message(chat_id, "📈 Analizando acciones... puede tardar 1-2 minutos.")
         result = run_stock_screener_agent()
+        await send_message(chat_id, result)
+
+    background_tasks.add_task(handle)
+    return {"ok": True}
+
+@app.post("/agents/granola-digest")
+async def granola_digest_endpoint(request: Request, background_tasks: BackgroundTasks):
+    """Endpoint para Make — resumen diario de reuniones de Granola enviado a Telegram.
+    Body: {"chat_id": "...", "date": "YYYY-MM-DD" (opcional), "create_tasks": true (opcional)}
+    Header: X-Cron-Secret: <CRON_SECRET>
+    """
+    cron_secret = os.environ.get("CRON_SECRET", "")
+    if cron_secret and request.headers.get("X-Cron-Secret") != cron_secret:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    data = await request.json()
+    chat_id = str(data.get("chat_id", ""))
+    if not chat_id:
+        return {"error": "chat_id requerido"}
+
+    day = None
+    if data.get("date"):
+        from datetime import date as _date
+        try:
+            day = _date.fromisoformat(data["date"])
+        except ValueError:
+            return {"error": "date debe ser YYYY-MM-DD"}
+    create_tasks = bool(data.get("create_tasks", True))
+
+    async def handle():
+        try:
+            result = await run_in_threadpool(run_granola_digest, day, create_tasks)
+        except Exception as e:
+            logger.error(f"Error en granola digest: {e}", exc_info=True)
+            result = f"⚠️ Error armando el resumen de Granola: {e}"
         await send_message(chat_id, result)
 
     background_tasks.add_task(handle)
@@ -263,6 +301,18 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             _oauth_state[state] = chat_id
             auth_url = get_auth_url() + f"&state={state}"
             await send_message(chat_id, f"📅 Hacé click para conectar Google Calendar:\n{auth_url}")
+            return {"ok": True}
+
+        if text.lower() == "/resumen_hoy":
+            async def handle_digest():
+                await send_message(chat_id, "🗓️ Armando el resumen de hoy...")
+                try:
+                    result = await run_in_threadpool(run_granola_digest, None, True)
+                except Exception as e:
+                    logger.error(f"Error en /resumen_hoy: {e}", exc_info=True)
+                    result = f"⚠️ Error armando el resumen: {e}"
+                await send_message(chat_id, result)
+            background_tasks.add_task(handle_digest)
             return {"ok": True}
 
         if text.lower() == "/importar_notion":
