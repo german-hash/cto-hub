@@ -42,7 +42,7 @@ def run_news_agent(topic: str, system_prompt: str) -> str:
                         search_depth="advanced",
                         max_results=5,
                         include_raw_content=False,
-                        days=7
+                        days=14
                     )
                     noticias_texto = ""
                     for r in resultado["results"]:
@@ -67,7 +67,7 @@ def run_tech_news_agent() -> dict:
     texto = run_news_agent("tecnologia", """Eres un agente especializado en noticias de tecnologia.
 Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
-- Solo mostras noticias de los ultimos 7 dias
+- Priorizas noticias de los ultimos 14 dias, pero podés incluir hasta 30 dias si hay pocas recientes
 - Presentas entre 8 y 10 noticias, entre 5 y 6 del mundo y entre 3 y 4 de latam
 - El texto debe estar escrito para ser LEIDO EN VOZ ALTA, sin markdown
 - No uses simbolos como #, *, **, ---, emojis ni caracteres especiales
@@ -96,7 +96,7 @@ def run_qsr_news_agent() -> dict:
     texto = run_news_agent("QSR (Quick Service Restaurants)", """Eres un agente especializado en noticias de QSR.
 Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
-- Solo mostras noticias de los ultimos 7 dias
+- Priorizas noticias de los ultimos 14 dias, pero podés incluir hasta 30 dias si hay pocas recientes
 - Presentas entre 8 y 10 noticias, entre 5 y 6 del mundo y entre 3 y 4 de latam
 - El texto debe estar escrito para ser LEIDO EN VOZ ALTA, sin markdown
 - No uses simbolos como #, *, **, ---, emojis ni caracteres especiales
@@ -127,7 +127,7 @@ def run_finance_news_agent() -> dict:
     texto = run_news_agent("finanzas y global macro", """Eres un agente especializado en noticias de finanzas y global macro.
 Cuando el usuario te pida noticias, usas la tool buscar_noticias para buscar informacion actualizada.
 IMPORTANTE:
-- Solo mostras noticias de los ultimos 7 dias
+- Priorizas noticias de los ultimos 14 dias, pero podés incluir hasta 30 dias si hay pocas recientes
 - Presentas entre 8 y 10 noticias, entre 5 y 6 del mundo y entre 3 y 4 de latam
 - El texto debe estar escrito para ser LEIDO EN VOZ ALTA, sin markdown
 - No uses simbolos como #, *, **, ---, emojis ni caracteres especiales
