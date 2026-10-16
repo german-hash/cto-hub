@@ -5,6 +5,7 @@ Trae las notas de Granola de un día (hora Argentina), arma un digest con Claude
 y opcionalmente guarda los accionables en la tabla `tasks` de Supabase.
 """
 import os
+import re
 import json
 import time
 import logging
@@ -19,7 +20,7 @@ GRANOLA_BASE = "https://public-api.granola.ai/v1"
 DIGEST_MODEL = os.environ.get("GRANOLA_DIGEST_MODEL", "claude-sonnet-5-5")
 ART = timezone(timedelta(hours=-3))  # Argentina no tiene DST
 
-MAX_NOTE_CHARS = 6000        # tope de texto por reunión que mandamos a Claude
+MAX_NOTE_CHARS = 20000       # tope de texto por reunión que mandamos a Claude
 MAX_TRANSCRIPT_CHARS = 3000  # tope de transcripción si no hay resumen
 
 
@@ -127,13 +128,7 @@ SYSTEM_PROMPT = """Sos el asistente del CTO de Tecnología Digital de Arcos Dora
 Te paso las notas de las reuniones de un día (de Granola). Armá un resumen ejecutivo en español rioplatense,
 directo y sin relleno.
 
-Devolvé SOLO un JSON válido, sin texto antes ni después, con esta forma:
-{
-  "digest": "texto para Telegram",
-  "action_items": [
-    {"title": "...", "owner": "nombre o vacío", "due_date": "YYYY-MM-DD o vacío", "priority": "low|medium|high", "meeting": "título de la reunión"}
-  ]
-}
+Respondé SIEMPRE llamando a la herramienta save_digest.
 
 Reglas para "digest" (texto plano, SIN markdown: nada de **, #, ni _; podés usar emojis y saltos de línea):
 - Arrancá con "🗓️ Resumen de reuniones — DD/MM" y la cantidad de reuniones.
@@ -144,16 +139,45 @@ Reglas para "digest" (texto plano, SIN markdown: nada de **, #, ni _; podés usa
 - Máximo ~2500 caracteres en total.
 
 Reglas para "action_items": solo compromisos concretos que surgen de las notas; no inventes responsables ni fechas.
+"title" corto e imperativo, máximo 80 caracteres (el detalle ya está en el digest).
 Prioridad high solo si hay urgencia o impacto explícito."""
 
+DIGEST_TOOL = {
+    "name": "save_digest",
+    "description": "Guarda el resumen diario de reuniones y sus accionables.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "digest": {"type": "string", "description": "Texto plano para Telegram"},
+            "action_items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "maxLength": 120},
+                        "owner": {"type": "string"},
+                        "due_date": {"type": "string", "description": "YYYY-MM-DD o vacío"},
+                        "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+                        "meeting": {"type": "string"},
+                    },
+                    "required": ["title"],
+                },
+            },
+        },
+        "required": ["digest", "action_items"],
+    },
+}
 
-def _extract_json(text: str) -> dict:
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        text = text[text.find("{"):]
-    start, end = text.find("{"), text.rfind("}")
-    return json.loads(text[start:end + 1])
+
+def _salvage_digest(raw: str) -> str:
+    """Si llega JSON roto/cortado, rescata el campo digest en vez de mandar JSON crudo."""
+    m = re.search(r'"digest"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.S)
+    if m:
+        try:
+            return json.loads(f'"{m.group(1)}"')
+        except Exception:
+            return m.group(1).replace("\\n", "\n")
+    return raw
 
 
 def build_digest(day: date, notes_text: list[str]) -> dict:
@@ -161,17 +185,25 @@ def build_digest(day: date, notes_text: list[str]) -> dict:
     user_msg = f"Fecha: {day.strftime('%d/%m/%Y')}\nCantidad de reuniones: {len(notes_text)}\n\n" + "\n\n".join(notes_text)
     resp = client.messages.create(
         model=DIGEST_MODEL,
-        max_tokens=4000,
+        max_tokens=8000,
         system=SYSTEM_PROMPT,
+        tools=[DIGEST_TOOL],
+        tool_choice={"type": "tool", "name": "save_digest"},
         messages=[{"role": "user", "content": user_msg}],
     )
-    raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    try:
-        data = _extract_json(raw)
-        return {"digest": data.get("digest", "").strip(), "action_items": data.get("action_items", []) or []}
-    except Exception:
-        logger.warning("Granola digest: no pude parsear JSON, mando texto crudo")
-        return {"digest": raw.strip(), "action_items": []}
+    if resp.stop_reason == "max_tokens":
+        logger.warning("Granola digest: respuesta cortada por max_tokens")
+
+    for block in resp.content:
+        if getattr(block, "type", "") == "tool_use" and isinstance(block.input, dict):
+            data = block.input
+            digest = (data.get("digest") or "").strip()
+            if digest:
+                return {"digest": digest, "action_items": data.get("action_items") or []}
+
+    raw = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text")
+    logger.warning("Granola digest: sin tool_use válido, uso fallback de texto")
+    return {"digest": _salvage_digest(raw).strip() or "⚠️ No pude armar el resumen.", "action_items": []}
 
 
 # ── Supabase ─────────────────────────────────────────────────────────────────
