@@ -19,7 +19,7 @@ from app.tools.calendar import get_auth_url, exchange_code, save_tokens
 from app.tools.notion_import import run_notion_import
 from app.agents.news_agent_base import run_tech_news_agent, run_qsr_news_agent, run_finance_news_agent
 from app.agents.stock_screener_agent import run_stock_screener_agent
-from app.agents.granola_digest_agent import run_granola_digest
+from app.agents.granola_digest_agent import run_granola_weekly_digest
 from app.tools.calendar_tools import set_current_chat_id
 
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +40,7 @@ HELP_TEXT = """🤖 CTO Hub — Comandos
 /conectar_calendar — Conecta Google Calendar
 /dashboard — Link al dashboard web
 /importar_notion — Importa historial de Notion a la knowledge base
-/resumen_hoy — Resumen de las reuniones de hoy (Granola)
+/resumen_semana — Resumen semanal de reuniones (Granola)
 /help — Esta ayuda
 
 Funciones:
@@ -118,8 +118,9 @@ async def stock_screener_endpoint(request: Request, background_tasks: Background
 
 @app.post("/agents/granola-digest")
 async def granola_digest_endpoint(request: Request, background_tasks: BackgroundTasks):
-    """Endpoint para Make — resumen diario de reuniones de Granola enviado a Telegram.
-    Body: {"chat_id": "...", "date": "YYYY-MM-DD" (opcional), "create_tasks": true (opcional)}
+    """Endpoint para Make — resumen SEMANAL de reuniones de Granola enviado a Telegram.
+    Body: {"chat_id": "...", "date": "YYYY-MM-DD" (opcional, cualquier día de la semana a resumir;
+           por defecto la semana actual), "create_tasks": true (opcional)}
     Header: X-Cron-Secret: <CRON_SECRET>
     """
     cron_secret = os.environ.get("CRON_SECRET", "")
@@ -142,7 +143,7 @@ async def granola_digest_endpoint(request: Request, background_tasks: Background
 
     async def handle():
         try:
-            result = await run_in_threadpool(run_granola_digest, day, create_tasks)
+            result = await run_in_threadpool(run_granola_weekly_digest, day, create_tasks)
         except Exception as e:
             logger.error(f"Error en granola digest: {e}", exc_info=True)
             result = f"⚠️ Error armando el resumen de Granola: {e}"
@@ -303,13 +304,13 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
             await send_message(chat_id, f"📅 Hacé click para conectar Google Calendar:\n{auth_url}")
             return {"ok": True}
 
-        if text.lower() == "/resumen_hoy":
+        if text.lower() in ("/resumen_semana", "/resumen_hoy"):
             async def handle_digest():
-                await send_message(chat_id, "🗓️ Armando el resumen de hoy...")
+                await send_message(chat_id, "📅 Armando el resumen de la semana... puede tardar 1-2 minutos.")
                 try:
-                    result = await run_in_threadpool(run_granola_digest, None, True)
+                    result = await run_in_threadpool(run_granola_weekly_digest, None, True)
                 except Exception as e:
-                    logger.error(f"Error en /resumen_hoy: {e}", exc_info=True)
+                    logger.error(f"Error en /resumen_semana: {e}", exc_info=True)
                     result = f"⚠️ Error armando el resumen: {e}"
                 await send_message(chat_id, result)
             background_tasks.add_task(handle_digest)
