@@ -195,6 +195,8 @@ def build_weekly_digest(start_day: date, end_day: date, notes_text: list[str]) -
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_msg}],
     )
+    from app.tools.usage import log_usage
+    log_usage("granola_weekly", DIGEST_MODEL, resp.usage)
     if resp.stop_reason == "max_tokens":
         logger.warning("Granola weekly: respuesta cortada por max_tokens")
 

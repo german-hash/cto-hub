@@ -94,4 +94,6 @@ El formato debe ser claro y conciso, ideal para leer en Telegram.
 Respondés siempre en español.""",
         messages=[{"role": "user", "content": f"Analizá estas acciones y seleccioná el TOP 10:\n\n{resumen}"}]
     )
+    from app.tools.usage import log_usage
+    log_usage("stock_screener", "claude-haiku-4-5-20251001", response.usage)
     return response.content[0].text

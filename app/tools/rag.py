@@ -54,17 +54,17 @@ def ingest_text(content: str, source: str = "", type: str = "text") -> int:
     return saved
 
 @tool
-def search_knowledge(query: str, limit: int = 5) -> str:
+def search_knowledge(query: str, limit: int = 3) -> str:
     """
     Busca semánticamente en la knowledge base del CTO.
     Usá esta tool cuando necesitás recordar algo que fue ingresado antes
-    (notas, audios, documentos, URLs).
+    (notas, reuniones, audios, documentos). limit: 3 por defecto, hasta 8 si hace falta más contexto.
     """
     try:
         embedding = get_embedding(query)
         result = supabase.rpc("match_knowledge_chunks", {
             "query_embedding": embedding,
-            "match_count": limit
+            "match_count": max(1, min(int(limit), 8))
         }).execute()
 
         if not result.data:
@@ -74,7 +74,8 @@ def search_knowledge(query: str, limit: int = 5) -> str:
         for r in result.data:
             source = f" [{r['source']}]" if r.get("source") else ""
             lines.append(f"\n---{source}")
-            lines.append(r["content"])
+            content = r["content"]
+            lines.append(content[:1500] + ("…" if len(content) > 1500 else ""))
 
         return "\n".join(lines)
     except Exception as e:

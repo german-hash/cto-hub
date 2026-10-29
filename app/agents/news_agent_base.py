@@ -2,6 +2,10 @@ import os
 from datetime import date
 from anthropic import Anthropic
 from tavily import TavilyClient
+from app.tools.usage import log_usage
+
+NEWS_MODEL = "claude-haiku-4-5-20251001"
+MAX_NEWS_ITERATIONS = 6  # antes era while True: un loop sin tope podía quemar tokens
 
 def run_news_agent(topic: str, system_prompt: str) -> str:
     """Función base para todos los agentes de noticias."""
@@ -23,14 +27,15 @@ def run_news_agent(topic: str, system_prompt: str) -> str:
     hoy_query = date.today().strftime("%d %B %Y")
     messages = [{"role": "user", "content": f"Cuales son las noticias de {topic} de la semana {hoy_query}?"}]
 
-    while True:
+    for _ in range(MAX_NEWS_ITERATIONS):
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=NEWS_MODEL,
             max_tokens=2048,
             system=system_prompt,
             tools=tools,
             messages=messages
         )
+        log_usage(f"news:{topic}", NEWS_MODEL, response.usage)
 
         if response.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": response.content})

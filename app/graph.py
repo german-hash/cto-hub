@@ -1,6 +1,6 @@
 from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, END
-from app.tools.memory import get_history, save_message, reset_history, get_memory
+from app.tools.memory import get_history, save_message, reset_history, get_memory_for_prompt
 from app.agents.cto_agent import run_cto_agent
 
 class HubState(TypedDict):
@@ -19,7 +19,7 @@ def cto_node(state: HubState) -> HubState:
 
     save_message(chat_id, "user", user_message)
     history = get_history(chat_id)
-    memory = get_memory.invoke({})
+    memory = get_memory_for_prompt()
 
     response = run_cto_agent(history, memory)
     save_message(chat_id, "assistant", response)
