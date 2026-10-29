@@ -53,15 +53,24 @@ Funciones:
 
 async def send_message(chat_id: str, text: str):
     """Envía mensaje a Telegram dividiendo si supera el límite de 4096 chars."""
+    import asyncio
     MAX_LEN = 4000
     chunks = [text[i:i+MAX_LEN] for i in range(0, len(text), MAX_LEN)]
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=15.0)) as client:
         for chunk in chunks:
-            r = await client.post(f"{TELEGRAM_API}/sendMessage", json={
-                "chat_id": chat_id,
-                "text": chunk
-            })
-            logger.info(f"Telegram: {r.status_code}")
+            for attempt in range(3):
+                try:
+                    r = await client.post(f"{TELEGRAM_API}/sendMessage", json={
+                        "chat_id": chat_id,
+                        "text": chunk
+                    })
+                    logger.info(f"Telegram: {r.status_code}")
+                    break
+                except httpx.TransportError as e:
+                    logger.warning(f"Telegram: error de red ({type(e).__name__}), intento {attempt + 1}/3")
+                    await asyncio.sleep(2 * (attempt + 1))
+            else:
+                logger.error("Telegram: no se pudo enviar el mensaje después de 3 intentos")
 
 @app.get("/health")
 def health():

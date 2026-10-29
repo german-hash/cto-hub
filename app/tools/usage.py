@@ -29,7 +29,10 @@ def log_usage(source: str, model: str, usage) -> None:
         details = _get(usage, "input_token_details", None)
         if details:  # formato LangChain: input_tokens ya incluye la caché
             cache_read = _get(details, "cache_read")
-            cache_creation = _get(details, "cache_creation")
+            # LangChain pone la escritura de caché en ephemeral_5m/1h y deja cache_creation en 0
+            cache_creation = (_get(details, "cache_creation")
+                              + _get(details, "ephemeral_5m_input_tokens")
+                              + _get(details, "ephemeral_1h_input_tokens"))
             input_tokens = _get(usage, "input_tokens") - cache_read - cache_creation
         else:        # formato SDK de Anthropic: input_tokens excluye la caché
             cache_read = _get(usage, "cache_read_input_tokens")
