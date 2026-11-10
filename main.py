@@ -17,7 +17,7 @@ from app.tools.ingest import transcribe_audio, download_telegram_file, extract_t
 from app.tools.rag import ingest_text
 from app.tools.calendar import get_auth_url, exchange_code, save_tokens
 from app.tools.notion_import import run_notion_import
-from app.agents.news_agent_base import run_tech_news_agent, run_qsr_news_agent, run_finance_news_agent
+from app.agents.news_agent_base import NewsAgentError, run_tech_news_agent, run_qsr_news_agent, run_finance_news_agent
 from app.agents.stock_screener_agent import run_stock_screener_agent
 from app.agents.granola_digest_agent import run_granola_weekly_digest
 from app.tools.calendar_tools import set_current_chat_id
@@ -91,23 +91,34 @@ async def google_callback(code: str, state: str = ""):
         logger.error(f"Error OAuth: {e}")
         return HTMLResponse(f"<h2>Error al conectar: {str(e)}</h2>")
 
+async def _news(fn, nombre: str):
+    """Corre el agente de noticias fuera del event loop; reintenta una vez y, si falla, devuelve 502 para que
+    Make corte la ejecución en vez de mandar un audio vacío o con una disculpa."""
+    for intento in (1, 2):
+        try:
+            return await run_in_threadpool(fn)
+        except NewsAgentError as e:
+            logger.error(f"{nombre} intento {intento}: {e}")
+    return JSONResponse({"error": f"No se pudo generar el resumen de {nombre}"}, status_code=502)
+
+
 @app.get("/agents/tech-news")
 async def tech_news_endpoint():
     """Endpoint GET para Make — devuelve noticias tech + fuentes para TTS."""
-    result = run_tech_news_agent()
-    return result
+    return await _news(run_tech_news_agent, "tecnología")
+
 
 @app.get("/agents/qsr-news")
 async def qsr_news_endpoint():
     """Endpoint GET para Make — devuelve noticias QSR + fuentes para TTS."""
-    result = run_qsr_news_agent()
-    return result
+    return await _news(run_qsr_news_agent, "QSR")
+
 
 @app.get("/agents/finance-news")
 async def finance_news_endpoint():
     """Endpoint GET para Make — devuelve noticias finanzas + fuentes para TTS."""
-    result = run_finance_news_agent()
-    return result
+    return await _news(run_finance_news_agent, "finanzas")
+
 
 @app.post("/agents/stock-screener")
 async def stock_screener_endpoint(request: Request, background_tasks: BackgroundTasks):
